@@ -73,6 +73,38 @@ public static class ServerConfigValidator
         ValidateSpotTheDifference(value.SpotTheDifference);
         ValidatePlateStacker(value.PlateStacker);
         ValidateMaze(value.Maze);
+        ValidateSmackMan(value.SmackMan);
+    }
+
+    private static void ValidateSmackMan(SmackManSettings value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        Positive(value.DurationSeconds, "SmackMan.DurationSeconds");
+        Range(value.GroupCount, 1, ushort.MaxValue, "SmackMan.GroupCount");
+        Range(value.HeadsPerGroup, 1, SmackManScheduleGenerator.HoleCount,
+            "SmackMan.HeadsPerGroup");
+        if ((long)value.GroupCount * value.HeadsPerGroup > ushort.MaxValue)
+            throw Error("SmackMan cannot schedule more than 65535 heads.");
+        NonNegative(value.PointsPerHit, "SmackMan.PointsPerHit");
+        NonNegative(value.FirstGroupSeconds, "SmackMan.FirstGroupSeconds");
+        Positive(value.GroupIntervalSeconds, "SmackMan.GroupIntervalSeconds");
+        Positive(value.RiseDurationSeconds, "SmackMan.RiseDurationSeconds");
+        Positive(value.HoldDurationSeconds, "SmackMan.HoldDurationSeconds");
+        Positive(value.RetractDurationSeconds, "SmackMan.RetractDurationSeconds");
+        float activeDuration = value.RiseDurationSeconds +
+            value.HoldDurationSeconds + value.RetractDurationSeconds;
+        float finalExpiry = value.FirstGroupSeconds +
+            ((value.GroupCount - 1) * value.GroupIntervalSeconds) +
+            activeDuration;
+        if (finalExpiry > value.DurationSeconds + 0.0001f)
+            throw Error("SmackMan appearances must expire before the round ends.");
+        int overlappingGroups = Math.Min(
+            value.GroupCount,
+            (int)Math.Ceiling(activeDuration / value.GroupIntervalSeconds));
+        int maximumConcurrent = overlappingGroups * value.HeadsPerGroup;
+        if (maximumConcurrent > SmackManScheduleGenerator.HoleCount)
+            throw Error("SmackMan timing cannot show more heads than there are holes.");
+        Tolerances(value.InputGraceSeconds, value.FutureInputToleranceSeconds, "SmackMan");
     }
 
     private static void ValidateObstacleRunner(ObstacleRunnerSettings value)

@@ -240,6 +240,19 @@
       "maximumBatchSamples": 16,
       "maximumInputSamples": 512,
       "correctScore": 100
+    },
+    "smackMan": {
+      "durationSeconds": 16.0,
+      "groupCount": 4,
+      "headsPerGroup": 5,
+      "pointsPerHit": 5,
+      "firstGroupSeconds": 1.0,
+      "groupIntervalSeconds": 4.0,
+      "riseDurationSeconds": 0.12,
+      "holdDurationSeconds": 2.0,
+      "retractDurationSeconds": 0.5,
+      "inputGraceSeconds": 0.5,
+      "futureInputToleranceSeconds": 0.1
     }
   }
 }

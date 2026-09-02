@@ -19,12 +19,16 @@ string clientRoot = args.Length > 1
     ("Maze payload contains the authoritative layout", TestMazePayload),
     ("Maze movement blocks walls and slides along them", TestMazeMovement),
     ("Maze completion and timeout scoring are authoritative", TestMazeScoring),
+    ("ObstacleRunner fixed finish has no speed bonus", TestObstacleRunnerSpeedMultiplier),
     ("Falling-object schedules are deterministic", TestFallingScheduleDeterminism),
     ("PlateStacker schedules are deterministic and evenly paced", TestPlateStackerSchedule),
     ("Horde schedules are deterministic", TestHordeScheduleDeterminism),
+    ("SmackMan schedules are deterministic and bounded", TestSmackManSchedule),
     ("Falling-object payload contains authoritative schedule", TestFallingPayload),
     ("PlateStacker payload contains authoritative rules and schedule", TestPlateStackerPayload),
     ("Horde payload contains authoritative schedule", TestHordePayload),
+    ("SmackMan payload contains authoritative schedule", TestSmackManPayload),
+    ("SmackMan validates clicks and scores at 1x", TestSmackManScoring),
     ("PotatoFace targets are deterministic and valid", TestPotatoFaceTargets),
     ("PotatoFace scoring rewards matching accuracy", TestPotatoFaceScoring),
     ("PotatoFace payload contains the target face", TestPotatoFacePayload),
@@ -90,6 +94,15 @@ void TestDefaultConfiguration()
     AssertEx.Equal(15f, loaded.MiniGames.Maze.DurationSeconds);
     AssertEx.Equal(12, loaded.MiniGames.Maze.GridSize);
     AssertEx.Equal(100, loaded.MiniGames.Maze.CorrectScore);
+    AssertEx.Equal(16f, loaded.MiniGames.SmackMan.DurationSeconds);
+    AssertEx.Equal(4, loaded.MiniGames.SmackMan.GroupCount);
+    AssertEx.Equal(5, loaded.MiniGames.SmackMan.HeadsPerGroup);
+    AssertEx.Equal(5, loaded.MiniGames.SmackMan.PointsPerHit);
+    AssertEx.Equal(1f, loaded.MiniGames.SmackMan.FirstGroupSeconds);
+    AssertEx.Equal(4f, loaded.MiniGames.SmackMan.GroupIntervalSeconds);
+    AssertEx.Equal(0.12f, loaded.MiniGames.SmackMan.RiseDurationSeconds);
+    AssertEx.Equal(2f, loaded.MiniGames.SmackMan.HoldDurationSeconds);
+    AssertEx.Equal(0.5f, loaded.MiniGames.SmackMan.RetractDurationSeconds);
 }
 
 void TestInvalidConfiguration()
@@ -102,6 +115,18 @@ void TestInvalidConfiguration()
             MiniGames = new MiniGameSettings
             {
                 CarPark = new CarParkSettings { MaximumInputSamples = 2 },
+            },
+        }));
+    AssertEx.Throws<InvalidDataException>(() =>
+        ServerConfigValidator.Validate(new ServerConfig
+        {
+            MiniGames = new MiniGameSettings
+            {
+                SmackMan = new SmackManSettings
+                {
+                    HeadsPerGroup = 9,
+                    GroupIntervalSeconds = 1f,
+                },
             },
         }));
     AssertEx.Throws<InvalidDataException>(() =>
@@ -135,7 +160,7 @@ void TestGeneratedProtocols()
     AssertEx.True(ProtocolCodeGenerator.Matches(
         Path.Combine(clientRoot, "Assets", "Scripts", "Networking", "KarnivalProtocol.cs"),
         expected));
-    AssertEx.Equal((ushort)36, KarnivalProtocol.Version);
+    AssertEx.Equal((ushort)38, KarnivalProtocol.Version);
 }
 
 void TestMazeLayout()
@@ -474,6 +499,40 @@ void TestSpotTheDifferenceScoring()
     AssertEx.Equal(3f, completePlayer.RoundResult.SpeedMultiplier);
 }
 
+void TestObstacleRunnerSpeedMultiplier()
+{
+    const float durationSeconds = 12f;
+    ObstacleRunnerSettings settings = new()
+    {
+        InputGraceSeconds = 0f,
+    };
+    DateTime startsUtc = DateTime.UtcNow.AddSeconds(-durationSeconds);
+    ObstacleScheduleEntry[] schedule =
+    {
+        new(1, ObstacleHeight.High, durationSeconds * 0.9f),
+    };
+    ObstacleRunnerRound round = new(
+        1014,
+        startsUtc,
+        durationSeconds,
+        1f,
+        schedule,
+        settings);
+    PlayerSession player = new(11, 51, "runner");
+    Riptide.Server server = new();
+
+    round.RegisterPlayer(player, startsUtc);
+    round.Update(
+        startsUtc.AddSeconds(schedule[0].CollisionSeconds),
+        new[] { player },
+        server);
+
+    AssertEx.True(player.SubmittedThisRound);
+    AssertEx.Equal(100, player.RoundResult.BaseScore);
+    AssertEx.Equal(100, player.RoundScore);
+    AssertEx.Equal(1f, player.RoundResult.SpeedMultiplier);
+}
+
 void TestFallingScheduleDeterminism()
 {
     FallingObjectScheduleEntry[] first = FallingObjectScheduleGenerator.Generate(
@@ -530,6 +589,41 @@ void TestHordeScheduleDeterminism()
         54321, 25, 0.5f, 10f, 3f, 4.5f, 0.1f, 0.9f);
     AssertEx.SequenceEqual(first, second);
     AssertEx.True(first.All(entry => entry.YNormalized is >= 0.1f and <= 0.9f));
+}
+
+void TestSmackManSchedule()
+{
+    const float activeDuration = 2.62f;
+    SmackManScheduleEntry[] first = SmackManScheduleGenerator.Generate(
+        0x12345678u, 4, 5, 1f, 4f, activeDuration);
+    SmackManScheduleEntry[] second = SmackManScheduleGenerator.Generate(
+        0x12345678u, 4, 5, 1f, 4f, activeDuration);
+    AssertEx.SequenceEqual(first, second);
+    AssertEx.Equal(20, first.Length);
+    float[] expectedWaveTimes = { 1f, 5f, 9f, 13f };
+    for (int waveIndex = 0; waveIndex < expectedWaveTimes.Length; waveIndex++)
+    {
+        SmackManScheduleEntry[] wave = first
+            .Skip(waveIndex * 5)
+            .Take(5)
+            .ToArray();
+        AssertEx.True(wave.All(entry =>
+            entry.SpawnSeconds == expectedWaveTimes[waveIndex]));
+        AssertEx.Equal(5, wave.Select(entry => entry.HoleIndex).Distinct().Count());
+    }
+    AssertEx.True(first.All(entry =>
+        entry.HoleIndex < SmackManScheduleGenerator.HoleCount));
+
+    foreach (SmackManScheduleEntry entry in first)
+    {
+        SmackManScheduleEntry[] active = first
+            .Where(candidate =>
+                candidate.SpawnSeconds <= entry.SpawnSeconds &&
+                candidate.SpawnSeconds + activeDuration > entry.SpawnSeconds)
+            .ToArray();
+        AssertEx.True(active.Length <= 5);
+        AssertEx.Equal(active.Length, active.Select(candidate => candidate.HoleIndex).Distinct().Count());
+    }
 }
 
 void TestFallingPayload()
@@ -752,6 +846,116 @@ void TestHordePayload()
     {
         message.Release();
     }
+}
+
+void TestSmackManPayload()
+{
+    SmackManRound round = (SmackManRound)new SmackManMiniGame(
+        new SmackManSettings()).CreateRound(Context(1017, 81));
+    round.ConfigureSession(15, 7, 20);
+    Message message = round.CreateStartedMessage();
+    try
+    {
+        SkipStartedHeader(message, MiniGameType.SmackMan);
+        message.GetUInt();
+        AssertEx.Equal(5, message.GetInt());
+        AssertEx.Equal(0.12f, message.GetFloat());
+        AssertEx.Equal(2f, message.GetFloat());
+        AssertEx.Equal(0.5f, message.GetFloat());
+        int count = message.GetUShort();
+        AssertEx.Equal(20, count);
+        AssertEx.Equal(round.Schedule.Count, count);
+        for (int index = 0; index < count; index++)
+        {
+            SmackManScheduleEntry expected = round.Schedule[index];
+            AssertEx.Equal(expected.AppearanceId, message.GetUShort());
+            AssertEx.Equal(expected.HoleIndex, message.GetByte());
+            AssertEx.Equal(expected.SpawnSeconds, message.GetFloat());
+        }
+        AssertEx.Equal(100, round.MaximumScore);
+    }
+    finally
+    {
+        message.Release();
+    }
+}
+
+void TestSmackManScoring()
+{
+    SmackManSettings settings = new()
+    {
+        DurationSeconds = 2f,
+        GroupCount = 1,
+        HeadsPerGroup = 1,
+        PointsPerHit = 5,
+        FirstGroupSeconds = 0.4f,
+        GroupIntervalSeconds = 1f,
+        RiseDurationSeconds = 0.1f,
+        HoldDurationSeconds = 0.4f,
+        RetractDurationSeconds = 0.5f,
+        InputGraceSeconds = 0.5f,
+        FutureInputToleranceSeconds = 0.1f,
+    };
+    SmackManScheduleEntry[] schedule = { new(1, 3, 0.4f) };
+    DateTime startsUtc = DateTime.UtcNow.AddSeconds(-1.2f);
+    Riptide.Server server = new();
+    SmackManRound round = new(
+        1018,
+        startsUtc,
+        settings.DurationSeconds,
+        1f,
+        123u,
+        settings.PointsPerHit,
+        settings.RiseDurationSeconds,
+        settings.HoldDurationSeconds,
+        settings.RetractDurationSeconds,
+        schedule,
+        settings);
+    PlayerSession hitPlayer = new(12, 52, "smacker");
+    round.RegisterPlayer(hitPlayer, startsUtc);
+    SendSmack(round, hitPlayer, server, 1, 1.2f);
+    SendSmack(round, hitPlayer, server, 1, 1.2f);
+    AssertEx.True(hitPlayer.SubmittedThisRound);
+    AssertEx.Equal(5, hitPlayer.RoundResult.BaseScore);
+    AssertEx.Equal(5, hitPlayer.RoundScore);
+    AssertEx.Equal(5, hitPlayer.RoundResult.MaximumScore);
+    AssertEx.Equal(1f, hitPlayer.RoundResult.SpeedMultiplier);
+
+    PlayerSession earlyPlayer = new(14, 54, "early");
+    round.RegisterPlayer(earlyPlayer, startsUtc);
+    SendSmack(round, earlyPlayer, server, 1, 0.2f);
+    round.FinalizeRound(new[] { earlyPlayer }, server);
+    AssertEx.True(earlyPlayer.SubmittedThisRound);
+    AssertEx.Equal(0, earlyPlayer.RoundScore);
+
+    PlayerSession missedPlayer = new(13, 53, "missed");
+    round.RegisterPlayer(missedPlayer, startsUtc);
+    round.FinalizeRound(new[] { missedPlayer }, server);
+    AssertEx.True(missedPlayer.SubmittedThisRound);
+    AssertEx.Equal(0, missedPlayer.RoundScore);
+    AssertEx.Equal(1f, missedPlayer.RoundResult.SpeedMultiplier);
+
+    AssertEx.True(SmackManRound.IsVisible(schedule[0], 0.4f, 1f));
+    AssertEx.True(SmackManRound.IsVisible(schedule[0], 0.45f, 1f));
+    AssertEx.True(SmackManRound.IsVisible(schedule[0], 0.75f, 1f));
+    AssertEx.True(SmackManRound.IsVisible(schedule[0], 1.2f, 1f));
+    AssertEx.True(SmackManRound.IsVisible(schedule[0], 1.399f, 1f));
+    AssertEx.True(!SmackManRound.IsVisible(schedule[0], 0.399f, 1f));
+    AssertEx.True(!SmackManRound.IsVisible(schedule[0], 1.4f, 1f));
+}
+
+void SendSmack(
+    SmackManRound round,
+    PlayerSession player,
+    Riptide.Server server,
+    ushort appearanceId,
+    float clickedAtSeconds)
+{
+    Message message = Message.Create()
+        .AddUShort(appearanceId)
+        .AddFloat(clickedAtSeconds);
+    try { round.HandleInput(message, player, server); }
+    finally { message.Release(); }
 }
 
 void TestRoundResultRestore()

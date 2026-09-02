@@ -201,14 +201,11 @@ public sealed class ObstacleRunnerRound : MiniGameRoundBase
         int score = state.EligibleObstacles.Count == 0
             ? 0
             : (int)MathF.Round(100f * state.ClearedCount / state.EligibleObstacles.Count);
-        float completedAtSeconds = state.EligibleObstacles.Count == 0
-            ? Math.Clamp((float)(DateTime.UtcNow - StartsUtc).TotalSeconds, 0f, DurationSeconds)
-            : state.EligibleObstacles.Max(obstacle => obstacle.CollisionSeconds);
         CompleteSubmission(
             session,
             score,
             server,
-            completedAtSeconds: completedAtSeconds);
+            completedAtSeconds: DurationSeconds);
     }
 
     private RunnerAction GetActionAt(PlayerState state, float collisionSeconds)

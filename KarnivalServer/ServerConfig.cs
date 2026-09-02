@@ -49,6 +49,7 @@ public sealed class MiniGameSettings
     public SpotTheDifferenceSettings SpotTheDifference { get; init; } = new();
     public PlateStackerSettings PlateStacker { get; init; } = new();
     public MazeSettings Maze { get; init; } = new();
+    public SmackManSettings SmackMan { get; init; } = new();
 }
 
 public sealed class NetworkSimulationConfig

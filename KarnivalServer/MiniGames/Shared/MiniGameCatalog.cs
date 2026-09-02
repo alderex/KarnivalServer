@@ -29,6 +29,7 @@ public sealed class MiniGameCatalog
             new SpotTheDifferenceMiniGame(config.MiniGames.SpotTheDifference),
             new PlateStackerMiniGame(config.MiniGames.PlateStacker),
             new MazeMiniGame(config.MiniGames.Maze),
+            new SmackManMiniGame(config.MiniGames.SmackMan),
         });
     }
 
