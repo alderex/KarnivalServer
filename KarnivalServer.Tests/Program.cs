@@ -88,7 +88,7 @@ void TestDefaultConfiguration()
     AssertEx.Equal(10f, loaded.MiniGames.PlateStacker.DurationSeconds);
     AssertEx.Equal(10, loaded.MiniGames.PlateStacker.PlateCount);
     AssertEx.Equal(15f, loaded.MiniGames.Maze.DurationSeconds);
-    AssertEx.Equal(9, loaded.MiniGames.Maze.GridSize);
+    AssertEx.Equal(12, loaded.MiniGames.Maze.GridSize);
     AssertEx.Equal(100, loaded.MiniGames.Maze.CorrectScore);
 }
 
@@ -140,10 +140,10 @@ void TestGeneratedProtocols()
 
 void TestMazeLayout()
 {
-    MazeLayout first = MazeGenerator.Generate(0x12345678u, 9);
-    MazeLayout second = MazeGenerator.Generate(0x12345678u, 9);
-    AssertEx.Equal(9, first.GridSize);
-    AssertEx.Equal(40, first.StartCell);
+    MazeLayout first = MazeGenerator.Generate(0x12345678u, 12);
+    MazeLayout second = MazeGenerator.Generate(0x12345678u, 12);
+    AssertEx.Equal(12, first.GridSize);
+    AssertEx.Equal(78, first.StartCell);
     AssertEx.Equal(first.ExitCell, second.ExitCell);
     AssertEx.Equal(first.ExitSide, second.ExitSide);
     AssertEx.SequenceEqual(first.Walls, second.Walls);
@@ -168,11 +168,11 @@ void TestMazeLayout()
         }
     }
 
-    AssertEx.Equal(80, internalOpenings);
+    AssertEx.Equal(143, internalOpenings);
     IReadOnlyList<int> path = FindMazeCellPath(first);
     AssertEx.Equal(first.StartCell, path[0]);
     AssertEx.Equal(first.ExitCell, path[^1]);
-    AssertEx.Equal(81, CountReachableCells(first));
+    AssertEx.Equal(144, CountReachableCells(first));
     int exitColumn = first.ExitCell % first.GridSize;
     int exitRow = first.ExitCell / first.GridSize;
     AssertEx.True(
@@ -201,7 +201,7 @@ void TestMazePayload()
     {
         SkipStartedHeader(message, MiniGameType.Maze);
         AssertEx.Equal(round.Layout.Seed, message.GetUInt());
-        AssertEx.Equal((byte)9, message.GetByte());
+        AssertEx.Equal((byte)12, message.GetByte());
         AssertEx.Equal((byte)round.Layout.StartCell, message.GetByte());
         AssertEx.Equal((byte)round.Layout.ExitCell, message.GetByte());
         AssertEx.Equal((byte)round.Layout.ExitSide, message.GetByte());
@@ -209,9 +209,9 @@ void TestMazePayload()
         AssertEx.Equal(round.StartPosition.Y, message.GetFloat());
         AssertEx.Equal(round.ExitPosition.X, message.GetFloat());
         AssertEx.Equal(round.ExitPosition.Y, message.GetFloat());
-        AssertEx.Equal(0.025f, message.GetFloat());
-        AssertEx.Equal(0.006f, message.GetFloat());
-        AssertEx.Equal(0.035f, message.GetFloat());
+        AssertEx.Equal(0.01875f, message.GetFloat());
+        AssertEx.Equal(0.0045f, message.GetFloat());
+        AssertEx.Equal(0.02625f, message.GetFloat());
         AssertEx.Equal(0.12f, message.GetFloat());
         AssertEx.Equal((byte)16, message.GetByte());
         AssertEx.Equal((ushort)512, message.GetUShort());

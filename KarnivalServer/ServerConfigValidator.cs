@@ -330,8 +330,8 @@ public static class ServerConfigValidator
     {
         ArgumentNullException.ThrowIfNull(value);
         Positive(value.DurationSeconds, "Maze.DurationSeconds");
-        if (value.GridSize != 9)
-            throw Error("Maze.GridSize must be 9 for the authored 9x9 scene.");
+        if (value.GridSize != 12)
+            throw Error("Maze.GridSize must be 12.");
         Range(value.PlayerRadiusNormalized, 0.001f, 0.1f,
             "Maze.PlayerRadiusNormalized");
         Range(value.WallThicknessNormalized, 0.0001f, 0.05f,

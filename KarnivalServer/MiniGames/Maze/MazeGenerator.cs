@@ -26,8 +26,6 @@ public static class MazeGenerator
     public static MazeLayout Generate(uint seed, int requestedGridSize)
     {
         int gridSize = Math.Clamp(requestedGridSize, 3, 15);
-        if (gridSize % 2 == 0)
-            gridSize--;
 
         int cellCount = checked(gridSize * gridSize);
         byte[] walls = Enumerable
