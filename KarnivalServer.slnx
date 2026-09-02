@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="KarnivalServer/KarnivalServer.csproj" />
+  <Project Path="KarnivalServer.Tests/KarnivalServer.Tests.csproj" />
+  <Project Path="Tools/KarnivalProtocolGenerator/KarnivalProtocolGenerator.csproj" />
+</Solution>

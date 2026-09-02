@@ -1,0 +1,40 @@
+{
+  "version": 36,
+  "networkMessageIds": {
+    "LoginRequest": 1,
+    "LoginResult": 2,
+    "MiniGameStarted": 3,
+    "MiniGameInput": 4,
+    "MiniGameResults": 5,
+    "MiniGameScore": 6,
+    "ChatSend": 7,
+    "ChatBroadcast": 8,
+    "MiniGameEvent": 9,
+    "SessionCountdown": 10,
+    "SessionLobbyRoster": 11,
+    "SessionVictory": 12,
+    "MiniGameReady": 13,
+    "MiniGameCountdown": 14,
+    "SessionBettingState": 15,
+    "SessionBettingUpdate": 16,
+    "SessionBet": 17
+  },
+  "miniGameTypes": {
+    "SliderTarget": 1,
+    "ObstacleRunner": 2,
+    "PhotoPuzzleSlider": 3,
+    "FallingObjectCatcher": 4,
+    "HordeClicker": 5,
+    "ColorMatch": 6,
+    "ColorSequence": 7,
+    "CardMatch": 8,
+    "CupAndBall": 9,
+    "CarPark": 10,
+    "ArcheryPractice": 11,
+    "StopGo": 12,
+    "PotatoFace": 13,
+    "SpotTheDifference": 14,
+    "PlateStacker": 15,
+    "Maze": 16
+  }
+}
