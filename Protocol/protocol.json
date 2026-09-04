@@ -1,5 +1,5 @@
 {
-  "version": 38,
+  "version": 39,
   "networkMessageIds": {
     "LoginRequest": 1,
     "LoginResult": 2,
@@ -36,6 +36,7 @@
     "SpotTheDifference": 14,
     "PlateStacker": 15,
     "Maze": 16,
-    "SmackMan": 17
+    "SmackMan": 17,
+    "WheresBaldo": 18
   }
 }

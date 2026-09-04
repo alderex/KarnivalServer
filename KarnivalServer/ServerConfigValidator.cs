@@ -74,6 +74,19 @@ public static class ServerConfigValidator
         ValidatePlateStacker(value.PlateStacker);
         ValidateMaze(value.Maze);
         ValidateSmackMan(value.SmackMan);
+        ValidateWheresBaldo(value.WheresBaldo);
+    }
+
+    private static void ValidateWheresBaldo(WheresBaldoSettings value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        Positive(value.DurationSeconds, "WheresBaldo.DurationSeconds");
+        NonNegative(value.CorrectScore, "WheresBaldo.CorrectScore");
+        NonNegative(value.WrongSelectionPenalty, "WheresBaldo.WrongSelectionPenalty");
+        Tolerances(
+            value.InputGraceSeconds,
+            value.FutureInputToleranceSeconds,
+            "WheresBaldo");
     }
 
     private static void ValidateSmackMan(SmackManSettings value)
@@ -311,7 +324,7 @@ public static class ServerConfigValidator
     {
         ArgumentNullException.ThrowIfNull(value);
         Positive(value.DurationSeconds, "SpotTheDifference.DurationSeconds");
-        Range(value.AvailableDifferenceCount, 1, 7,
+        Range(value.AvailableDifferenceCount, 1, 6,
             "SpotTheDifference.AvailableDifferenceCount");
         Range(value.SelectedDifferenceCount, 1, value.AvailableDifferenceCount,
             "SpotTheDifference.SelectedDifferenceCount");

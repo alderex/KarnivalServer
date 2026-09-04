@@ -4,7 +4,7 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <RunPostBuildEvent>OnBuildSuccess</RunPostBuildEvent>
     <RootNamespace>Riptide</RootNamespace>
-    <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
     <PackageId>RiptideNetworking.Riptide</PackageId>
     <Authors>Tom Weiland</Authors>
     <Product>Riptide Networking</Product>

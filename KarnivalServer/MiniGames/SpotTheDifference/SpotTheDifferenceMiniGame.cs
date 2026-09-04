@@ -14,7 +14,7 @@ public sealed class SpotTheDifferenceMiniGame : IMiniGame
         int availableCount = Math.Clamp(
             settings.AvailableDifferenceCount,
             1,
-            7);
+            6);
         int selectedCount = Math.Clamp(
             settings.SelectedDifferenceCount,
             1,

@@ -30,6 +30,7 @@ public sealed class MiniGameCatalog
             new PlateStackerMiniGame(config.MiniGames.PlateStacker),
             new MazeMiniGame(config.MiniGames.Maze),
             new SmackManMiniGame(config.MiniGames.SmackMan),
+            new WheresBaldoMiniGame(config.MiniGames.WheresBaldo),
         });
     }
 

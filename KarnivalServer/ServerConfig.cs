@@ -50,6 +50,7 @@ public sealed class MiniGameSettings
     public PlateStackerSettings PlateStacker { get; init; } = new();
     public MazeSettings Maze { get; init; } = new();
     public SmackManSettings SmackMan { get; init; } = new();
+    public WheresBaldoSettings WheresBaldo { get; init; } = new();
 }
 
 public sealed class NetworkSimulationConfig

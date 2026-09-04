@@ -29,6 +29,8 @@ string clientRoot = args.Length > 1
     ("Horde payload contains authoritative schedule", TestHordePayload),
     ("SmackMan payload contains authoritative schedule", TestSmackManPayload),
     ("SmackMan validates clicks and scores at 1x", TestSmackManScoring),
+    ("Where's Baldo payload contains the authoritative crowd", TestWheresBaldoPayload),
+    ("Where's Baldo validates selections and scores independently", TestWheresBaldoScoring),
     ("PotatoFace targets are deterministic and valid", TestPotatoFaceTargets),
     ("PotatoFace scoring rewards matching accuracy", TestPotatoFaceScoring),
     ("PotatoFace payload contains the target face", TestPotatoFacePayload),
@@ -38,6 +40,7 @@ string clientRoot = args.Length > 1
     ("PlateStacker catches, misses, collapse, and scoring are authoritative", TestPlateStackerScoring),
     ("Round-result metadata survives reconnect restore", TestRoundResultRestore),
     ("StopGo input history is bounded and coalesced", TestStopGoInputBounds),
+    ("CarPark never targets a center parking space", TestCarParkTargetSelection),
     ("CarPark input history is bounded and coalesced", TestCarParkInputBounds),
 };
 
@@ -87,7 +90,7 @@ void TestDefaultConfiguration()
     AssertEx.Equal(256, loaded.MiniGames.StopGo.MaximumInputSamples);
     AssertEx.Equal(20f, loaded.MiniGames.PotatoFace.DurationSeconds);
     AssertEx.Equal(10f, loaded.MiniGames.SpotTheDifference.DurationSeconds);
-    AssertEx.Equal(7, loaded.MiniGames.SpotTheDifference.AvailableDifferenceCount);
+    AssertEx.Equal(6, loaded.MiniGames.SpotTheDifference.AvailableDifferenceCount);
     AssertEx.Equal(3, loaded.MiniGames.SpotTheDifference.SelectedDifferenceCount);
     AssertEx.Equal(10f, loaded.MiniGames.PlateStacker.DurationSeconds);
     AssertEx.Equal(10, loaded.MiniGames.PlateStacker.PlateCount);
@@ -103,6 +106,12 @@ void TestDefaultConfiguration()
     AssertEx.Equal(0.12f, loaded.MiniGames.SmackMan.RiseDurationSeconds);
     AssertEx.Equal(2f, loaded.MiniGames.SmackMan.HoldDurationSeconds);
     AssertEx.Equal(0.5f, loaded.MiniGames.SmackMan.RetractDurationSeconds);
+    AssertEx.Equal(10f, loaded.MiniGames.WheresBaldo.DurationSeconds);
+    AssertEx.Equal(100, loaded.MiniGames.WheresBaldo.CorrectScore);
+    AssertEx.Equal(10, loaded.MiniGames.WheresBaldo.WrongSelectionPenalty);
+    MiniGameCatalog catalog = MiniGameCatalog.CreateDefault(loaded);
+    AssertEx.Equal(18, catalog.Count);
+    AssertEx.True(catalog.TryGetGame("WheresBaldo", out _));
 }
 
 void TestInvalidConfiguration()
@@ -148,6 +157,17 @@ void TestInvalidConfiguration()
                 },
             },
         }));
+    AssertEx.Throws<InvalidDataException>(() =>
+        ServerConfigValidator.Validate(new ServerConfig
+        {
+            MiniGames = new MiniGameSettings
+            {
+                WheresBaldo = new WheresBaldoSettings
+                {
+                    WrongSelectionPenalty = -1,
+                },
+            },
+        }));
 }
 
 void TestGeneratedProtocols()
@@ -160,7 +180,72 @@ void TestGeneratedProtocols()
     AssertEx.True(ProtocolCodeGenerator.Matches(
         Path.Combine(clientRoot, "Assets", "Scripts", "Networking", "KarnivalProtocol.cs"),
         expected));
-    AssertEx.Equal((ushort)38, KarnivalProtocol.Version);
+    AssertEx.Equal((ushort)39, KarnivalProtocol.Version);
+}
+
+void TestWheresBaldoPayload()
+{
+    AssertEx.Equal(100, WheresBaldoMiniGame.CharacterCount);
+    WheresBaldoRound round = (WheresBaldoRound)new WheresBaldoMiniGame(
+        new WheresBaldoSettings()).CreateRound(Context(1018, 71));
+    round.ConfigureSession(15, 7, 20);
+    Message message = round.CreateStartedMessage();
+    try
+    {
+        SkipStartedHeader(message, MiniGameType.WheresBaldo);
+        AssertEx.Equal(round.CrowdSeed, message.GetUInt());
+        AssertEx.Equal(round.BaldoCharacterId, message.GetByte());
+        AssertEx.True(
+            round.BaldoCharacterId < WheresBaldoMiniGame.CharacterCount);
+        AssertEx.Equal(100, round.MaximumScore);
+    }
+    finally
+    {
+        message.Release();
+    }
+}
+
+void TestWheresBaldoScoring()
+{
+    WheresBaldoSettings settings = new()
+    {
+        FutureInputToleranceSeconds = 2f,
+        InputGraceSeconds = 0.5f,
+    };
+    WheresBaldoRound round = (WheresBaldoRound)new WheresBaldoMiniGame(settings)
+        .CreateRound(Context(1019, 72));
+    round.ScheduleStart(DateTime.UtcNow);
+    Riptide.Server server = new();
+
+    byte wrongOne = Enumerable.Range(0, WheresBaldoMiniGame.CharacterCount)
+        .Select(value => (byte)value)
+        .First(characterId => characterId != round.BaldoCharacterId);
+    byte wrongTwo = Enumerable.Range(
+            wrongOne + 1,
+            WheresBaldoMiniGame.CharacterCount)
+        .Select(value => (byte)(value % WheresBaldoMiniGame.CharacterCount))
+        .First(characterId => characterId != round.BaldoCharacterId &&
+            characterId != wrongOne);
+
+    PlayerSession penalized = new(15, 55, "penalized");
+    SendWheresBaldo(round, penalized, server, wrongOne, 0f);
+    SendWheresBaldo(round, penalized, server, wrongOne, 0f);
+    SendWheresBaldo(round, penalized, server, 200, 0f);
+    SendWheresBaldo(round, penalized, server, wrongTwo, 0f);
+    SendWheresBaldo(round, penalized, server, round.BaldoCharacterId, 0f);
+    AssertEx.True(penalized.SubmittedThisRound);
+    AssertEx.Equal(80, penalized.RoundResult.BaseScore);
+    AssertEx.Equal(240, penalized.RoundScore);
+
+    PlayerSession perfect = new(16, 56, "perfect");
+    SendWheresBaldo(round, perfect, server, round.BaldoCharacterId, 0f);
+    AssertEx.Equal(100, perfect.RoundResult.BaseScore);
+    AssertEx.Equal(300, perfect.RoundScore);
+
+    PlayerSession timedOut = new(17, 57, "timeout");
+    round.FinalizeRound(new[] { timedOut }, server);
+    AssertEx.True(timedOut.SubmittedThisRound);
+    AssertEx.Equal(0, timedOut.RoundScore);
 }
 
 void TestMazeLayout()
@@ -434,17 +519,17 @@ void TestSpotTheDifferencePayload()
 void TestSpotTheDifferenceSubset()
 {
     byte[] first = SpotTheDifferenceMiniGame.SelectDifferenceIds(
-        7,
+        6,
         3,
         new Random(2468));
     byte[] second = SpotTheDifferenceMiniGame.SelectDifferenceIds(
-        7,
+        6,
         3,
         new Random(2468));
     AssertEx.SequenceEqual(first, second);
     AssertEx.Equal(3, first.Length);
     AssertEx.Equal(3, first.Distinct().Count());
-    AssertEx.True(first.All(differenceId => differenceId < 7));
+    AssertEx.True(first.All(differenceId => differenceId < 6));
 }
 
 void TestSpotTheDifferenceScoring()
@@ -463,7 +548,7 @@ void TestSpotTheDifferenceScoring()
     byte firstSelected = partial.SelectedDifferenceIds[0];
     byte secondSelected = partial.SelectedDifferenceIds[1];
     byte thirdSelected = partial.SelectedDifferenceIds[2];
-    byte unselected = Enumerable.Range(0, 7)
+    byte unselected = Enumerable.Range(0, 6)
         .Select(value => (byte)value)
         .First(differenceId => !partial.SelectedDifferenceIds.Contains(differenceId));
     SendSpotTheDifference(
@@ -1024,6 +1109,28 @@ void TestCarParkInputBounds()
     AssertEx.Equal(256, GetSampleCount(round));
 }
 
+void TestCarParkTargetSelection()
+{
+    FieldInfo emptySpotField = typeof(CarParkRound).GetField(
+        "emptySpot", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("CarPark emptySpot field was not found.");
+
+    for (int spotCount = 3; spotCount <= 12; spotCount++)
+    {
+        CarParkMiniGame game = new(new CarParkSettings { ParkingSpotCount = spotCount });
+        for (int seed = 0; seed < 256; seed++)
+        {
+            CarParkRound round = (CarParkRound)game.CreateRound(Context(2000, seed));
+            byte targetSpot = (byte)(emptySpotField.GetValue(round)
+                ?? throw new InvalidOperationException("CarPark emptySpot is null."));
+
+            AssertEx.True(targetSpot < spotCount);
+            if (spotCount % 2 == 1)
+                AssertEx.True(targetSpot != spotCount / 2);
+        }
+    }
+}
+
 MiniGameRoundStartContext Context(uint roundId, int seed) =>
     new(roundId, DateTime.UtcNow, 10f, 10f, new Random(seed));
 
@@ -1065,6 +1172,18 @@ void SendSpotTheDifference(
     float sampledAt)
 {
     Message message = Message.Create().AddByte(differenceId).AddFloat(sampledAt);
+    try { round.HandleInput(message, player, server); }
+    finally { message.Release(); }
+}
+
+void SendWheresBaldo(
+    WheresBaldoRound round,
+    PlayerSession player,
+    Riptide.Server server,
+    byte characterId,
+    float sampledAt)
+{
+    Message message = Message.Create().AddByte(characterId).AddFloat(sampledAt);
     try { round.HandleInput(message, player, server); }
     finally { message.Release(); }
 }

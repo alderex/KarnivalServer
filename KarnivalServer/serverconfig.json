@@ -206,7 +206,7 @@
     },
     "spotTheDifference": {
       "durationSeconds": 10.0,
-      "availableDifferenceCount": 7,
+      "availableDifferenceCount": 6,
       "selectedDifferenceCount": 3,
       "pointsPerDifference": 25,
       "fullCompletionScore": 100,
@@ -251,6 +251,13 @@
       "riseDurationSeconds": 0.12,
       "holdDurationSeconds": 2.0,
       "retractDurationSeconds": 0.5,
+      "inputGraceSeconds": 0.5,
+      "futureInputToleranceSeconds": 0.1
+    },
+    "wheresBaldo": {
+      "durationSeconds": 10.0,
+      "correctScore": 100,
+      "wrongSelectionPenalty": 10,
       "inputGraceSeconds": 0.5,
       "futureInputToleranceSeconds": 0.1
     }
