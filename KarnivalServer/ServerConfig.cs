@@ -51,6 +51,7 @@ public sealed class MiniGameSettings
     public MazeSettings Maze { get; init; } = new();
     public SmackManSettings SmackMan { get; init; } = new();
     public WheresBaldoSettings WheresBaldo { get; init; } = new();
+    public WheelSpinnerSettings WheelSpinner { get; init; } = new();
 }
 
 public sealed class NetworkSimulationConfig

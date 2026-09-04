@@ -260,6 +260,24 @@
       "wrongSelectionPenalty": 10,
       "inputGraceSeconds": 0.5,
       "futureInputToleranceSeconds": 0.1
+    },
+    "wheelSpinner": {
+      "durationSeconds": 10.0,
+      "angularSpeedDegreesPerSecond": 240.0,
+      "slices": [
+        { "points": 10, "arcDegrees": 48.0 },
+        { "points": 25, "arcDegrees": 36.0 },
+        { "points": 10, "arcDegrees": 48.0 },
+        { "points": 50, "arcDegrees": 24.0 },
+        { "points": 10, "arcDegrees": 48.0 },
+        { "points": 25, "arcDegrees": 36.0 },
+        { "points": 10, "arcDegrees": 48.0 },
+        { "points": 50, "arcDegrees": 24.0 },
+        { "points": 25, "arcDegrees": 36.0 },
+        { "points": 100, "arcDegrees": 12.0 }
+      ],
+      "inputGraceSeconds": 0.5,
+      "futureInputToleranceSeconds": 0.1
     }
   }
 }

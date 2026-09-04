@@ -21,7 +21,7 @@ public sealed class MazeRound : MiniGameRoundBase
     private readonly MazeSettings settings;
     private readonly MazeMovementSimulator movementSimulator;
     private readonly MazePoint startPosition;
-    private readonly MazePoint exitPosition;
+    private readonly MazePoint goalPosition;
     private readonly Dictionary<ushort, PlayerState> playerStates = new();
 
     public MazeRound(
@@ -41,13 +41,13 @@ public sealed class MazeRound : MiniGameRoundBase
     {
         this.layout = layout;
         this.settings = settings;
-        startPosition = MazeGenerator.GetCellCenter(
-            layout.StartCell,
-            layout.GridSize);
-        exitPosition = MazeGenerator.GetExitCenter(
+        startPosition = MazeGenerator.GetOutsideStartPosition(
             layout,
             settings.PlayerRadiusNormalized,
-            settings.ExitRadiusNormalized);
+            settings.WallThicknessNormalized);
+        goalPosition = MazeGenerator.GetCellCenter(
+            layout.GoalCell,
+            layout.GridSize);
         movementSimulator = new MazeMovementSimulator(
             layout,
             settings.PlayerRadiusNormalized,
@@ -56,7 +56,7 @@ public sealed class MazeRound : MiniGameRoundBase
 
     public MazeLayout Layout => layout;
     public MazePoint StartPosition => startPosition;
-    public MazePoint ExitPosition => exitPosition;
+    public MazePoint GoalPosition => goalPosition;
 
     public override DateTime SubmissionDeadlineUtc =>
         EndsUtc.AddSeconds(Math.Max(0f, settings.InputGraceSeconds));
@@ -128,16 +128,16 @@ public sealed class MazeRound : MiniGameRoundBase
             state.LastSampleSeconds = sample.SampledAtSeconds;
             state.SampleCount++;
 
-            if (!TryGetExitFraction(
+            if (!TryGetGoalFraction(
                     movement.Segments,
-                    out float exitFraction))
+                    out float goalFraction))
             {
                 continue;
             }
 
             float completedAtSeconds = segmentStartsAt +
                 ((sample.SampledAtSeconds - segmentStartsAt) *
-                exitFraction);
+                goalFraction);
             state.Completed = true;
             SendSnapshot(session, state, true, server);
             CompleteSubmission(
@@ -172,7 +172,8 @@ public sealed class MazeRound : MiniGameRoundBase
     public override string Describe()
     {
         return $"seed={layout.Seed} grid={layout.GridSize}x{layout.GridSize} " +
-            $"exit={layout.ExitCell}:{layout.ExitSide}";
+            $"start={layout.StartCell}:{layout.EntranceSide} " +
+            $"goal={layout.GoalCell}";
     }
 
     protected override void WriteStartedPayload(Message message)
@@ -180,12 +181,12 @@ public sealed class MazeRound : MiniGameRoundBase
         message.AddUInt(layout.Seed);
         message.AddByte((byte)layout.GridSize);
         message.AddByte((byte)layout.StartCell);
-        message.AddByte((byte)layout.ExitCell);
-        message.AddByte((byte)layout.ExitSide);
+        message.AddByte((byte)layout.GoalCell);
+        message.AddByte((byte)layout.EntranceSide);
         message.AddFloat(startPosition.X);
         message.AddFloat(startPosition.Y);
-        message.AddFloat(exitPosition.X);
-        message.AddFloat(exitPosition.Y);
+        message.AddFloat(goalPosition.X);
+        message.AddFloat(goalPosition.Y);
         message.AddFloat(Math.Clamp(
             settings.PlayerRadiusNormalized,
             0.001f,
@@ -243,7 +244,7 @@ public sealed class MazeRound : MiniGameRoundBase
                 Math.Max(0f, settings.InputGraceSeconds);
     }
 
-    private bool TryGetExitFraction(
+    private bool TryGetGoalFraction(
         IReadOnlyList<MazeMovementSimulator.Segment> segments,
         out float fraction)
     {
@@ -259,7 +260,7 @@ public sealed class MazeRound : MiniGameRoundBase
             MazePoint position = segments.Count > 0
                 ? segments[^1].End
                 : startPosition;
-            return (position - exitPosition).LengthSquared <=
+            return (position - goalPosition).LengthSquared <=
                 completionRadius * completionRadius;
         }
 
@@ -271,7 +272,7 @@ public sealed class MazeRound : MiniGameRoundBase
             if (MazeMovementSimulator.TryGetCircleEntryFraction(
                 segment.Start,
                 segment.End,
-                exitPosition,
+                goalPosition,
                 completionRadius,
                 out float segmentFraction))
             {

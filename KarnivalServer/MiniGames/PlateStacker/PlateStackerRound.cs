@@ -141,23 +141,34 @@ public sealed class PlateStackerRound : MiniGameRoundBase
             return;
 
         float receivedAtSeconds = GetElapsedSeconds(nowUtc);
-        if (startsAtSeconds < state.SimulatedAtSeconds ||
+        if (startsAtSeconds < 0f ||
             startsAtSeconds > DurationSeconds ||
             startsAtSeconds >
                 receivedAtSeconds +
                 Math.Max(0f, settings.FutureInputToleranceSeconds) ||
-            receivedAtSeconds - startsAtSeconds >
-                Math.Max(0f, settings.InputGraceSeconds) ||
             state.DirectionChanges.Count >=
                 Math.Max(2, settings.MaximumInputSamples))
         {
             return;
         }
 
+        float effectiveStartsAtSeconds = startsAtSeconds;
+        if (startsAtSeconds < state.SimulatedAtSeconds ||
+            receivedAtSeconds - startsAtSeconds >
+                Math.Max(0f, settings.InputGraceSeconds))
+        {
+            // A delayed state sample cannot rewrite an evaluated landing, but
+            // applying it at receipt repairs a dropped or excessively late
+            // press/release for subsequent plates.
+            effectiveStartsAtSeconds = Math.Max(
+                state.SimulatedAtSeconds,
+                receivedAtSeconds);
+        }
+
         if (state.DirectionChanges.Count > 0)
         {
             DirectionChange previous = state.DirectionChanges[^1];
-            if (startsAtSeconds < previous.StartsAtSeconds)
+            if (effectiveStartsAtSeconds < previous.StartsAtSeconds)
                 return;
             if (direction == previous.Direction)
                 return;
@@ -168,7 +179,7 @@ public sealed class PlateStackerRound : MiniGameRoundBase
         }
 
         state.DirectionChanges.Add(
-            new DirectionChange(direction, startsAtSeconds));
+            new DirectionChange(direction, effectiveStartsAtSeconds));
     }
 
     public override void FinalizeRound(

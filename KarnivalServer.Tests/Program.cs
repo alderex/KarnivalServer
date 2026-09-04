@@ -31,6 +31,8 @@ string clientRoot = args.Length > 1
     ("SmackMan validates clicks and scores at 1x", TestSmackManScoring),
     ("Where's Baldo payload contains the authoritative crowd", TestWheresBaldoPayload),
     ("Where's Baldo validates selections and scores independently", TestWheresBaldoScoring),
+    ("WheelSpinner payload and angle mapping are deterministic", TestWheelSpinnerPayloadAndAngles),
+    ("WheelSpinner stop and timeout awards are authoritative", TestWheelSpinnerScoring),
     ("PotatoFace targets are deterministic and valid", TestPotatoFaceTargets),
     ("PotatoFace scoring rewards matching accuracy", TestPotatoFaceScoring),
     ("PotatoFace payload contains the target face", TestPotatoFacePayload),
@@ -109,9 +111,16 @@ void TestDefaultConfiguration()
     AssertEx.Equal(10f, loaded.MiniGames.WheresBaldo.DurationSeconds);
     AssertEx.Equal(100, loaded.MiniGames.WheresBaldo.CorrectScore);
     AssertEx.Equal(10, loaded.MiniGames.WheresBaldo.WrongSelectionPenalty);
+    AssertEx.Equal(10f, loaded.MiniGames.WheelSpinner.DurationSeconds);
+    AssertEx.Equal(240f,
+        loaded.MiniGames.WheelSpinner.AngularSpeedDegreesPerSecond);
+    AssertEx.Equal(10, loaded.MiniGames.WheelSpinner.Slices.Length);
+    AssertEx.Equal(360f,
+        loaded.MiniGames.WheelSpinner.Slices.Sum(slice => slice.ArcDegrees));
     MiniGameCatalog catalog = MiniGameCatalog.CreateDefault(loaded);
-    AssertEx.Equal(18, catalog.Count);
+    AssertEx.Equal(19, catalog.Count);
     AssertEx.True(catalog.TryGetGame("WheresBaldo", out _));
+    AssertEx.True(catalog.TryGetGame("WheelSpinner", out _));
 }
 
 void TestInvalidConfiguration()
@@ -168,6 +177,24 @@ void TestInvalidConfiguration()
                 },
             },
         }));
+    AssertEx.Throws<InvalidDataException>(() =>
+        ServerConfigValidator.Validate(new ServerConfig
+        {
+            MiniGames = new MiniGameSettings
+            {
+                WheelSpinner = new WheelSpinnerSettings
+                {
+                    Slices = new[]
+                    {
+                        new WheelSpinnerSliceSettings
+                        {
+                            Points = 100,
+                            ArcDegrees = 360f,
+                        },
+                    },
+                },
+            },
+        }));
 }
 
 void TestGeneratedProtocols()
@@ -180,7 +207,89 @@ void TestGeneratedProtocols()
     AssertEx.True(ProtocolCodeGenerator.Matches(
         Path.Combine(clientRoot, "Assets", "Scripts", "Networking", "KarnivalProtocol.cs"),
         expected));
-    AssertEx.Equal((ushort)39, KarnivalProtocol.Version);
+    AssertEx.Equal((ushort)40, KarnivalProtocol.Version);
+}
+
+void TestWheelSpinnerPayloadAndAngles()
+{
+    WheelSpinnerSettings settings = new();
+    WheelSpinnerRound round = (WheelSpinnerRound)new WheelSpinnerMiniGame(settings)
+        .CreateRound(Context(1020, 73));
+    round.ConfigureSession(19, 4, 20);
+    Message message = round.CreateStartedMessage();
+    try
+    {
+        SkipStartedHeader(message, MiniGameType.WheelSpinner);
+        AssertEx.Equal(round.InitialRotationDegrees, message.GetFloat());
+        AssertEx.Equal(240f, message.GetFloat());
+        AssertEx.Equal((byte)10, message.GetByte());
+        float totalDegrees = 0f;
+        for (int index = 0; index < settings.Slices.Length; index++)
+        {
+            AssertEx.Equal(settings.Slices[index].Points, message.GetInt());
+            float arcDegrees = message.GetFloat();
+            AssertEx.Equal(settings.Slices[index].ArcDegrees, arcDegrees);
+            totalDegrees += arcDegrees;
+        }
+        AssertEx.Equal(360f, totalDegrees);
+    }
+    finally
+    {
+        message.Release();
+    }
+
+    WheelSpinnerSlice[] slices = settings.Slices
+        .Select(slice => new WheelSpinnerSlice(slice.Points, slice.ArcDegrees))
+        .ToArray();
+    AssertEx.Equal(0, WheelSpinnerRound.GetSliceIndex(0f, slices));
+    AssertEx.Equal(1, WheelSpinnerRound.GetSliceIndex(-48f, slices));
+    AssertEx.Equal(9, WheelSpinnerRound.GetSliceIndex(12f, slices));
+    AssertEx.Equal(100, slices[
+        WheelSpinnerRound.GetSliceIndex(12f, slices)].Points);
+    AssertEx.Equal(120f,
+        WheelSpinnerRound.CalculateRotationDegrees(0f, 240f, 0.5f));
+    AssertEx.Equal(0f, WheelSpinnerRound.NormalizeDegrees(360f));
+}
+
+void TestWheelSpinnerScoring()
+{
+    WheelSpinnerSettings settings = new()
+    {
+        AngularSpeedDegreesPerSecond = 240f,
+        FutureInputToleranceSeconds = 2f,
+        InputGraceSeconds = 0.5f,
+    };
+    WheelSpinnerSlice[] slices = settings.Slices
+        .Select(slice => new WheelSpinnerSlice(slice.Points, slice.ArcDegrees))
+        .ToArray();
+    Riptide.Server server = new();
+
+    WheelSpinnerRound stoppedRound = new(
+        1021, DateTime.UtcNow, settings.DurationSeconds, 4f,
+        12f, settings.AngularSpeedDegreesPerSecond, slices, settings);
+    PlayerSession stopped = new(20, 58, "stopped", isSimulated: true);
+    SendWheelSpinner(stoppedRound, stopped, server, 0f);
+    AssertEx.True(stopped.SubmittedThisRound);
+    AssertEx.Equal(100, stopped.RoundResult.BaseScore);
+    AssertEx.Equal(100, stopped.RoundScore);
+    AssertEx.Equal(1f, stopped.RoundResult.SpeedMultiplier);
+    SendWheelSpinner(stoppedRound, stopped, server, 0.1f);
+    AssertEx.Equal(100, stopped.RoundScore);
+
+    WheelSpinnerRound timedRound = new(
+        1022, DateTime.UtcNow, settings.DurationSeconds, 4f,
+        0f, settings.AngularSpeedDegreesPerSecond, slices, settings);
+    PlayerSession timedOut = new(21, 59, "timeout", isSimulated: true);
+    timedRound.FinalizeRound(new[] { timedOut }, server);
+    int timedSlice = WheelSpinnerRound.GetSliceIndex(
+        WheelSpinnerRound.CalculateRotationDegrees(
+            0f, settings.AngularSpeedDegreesPerSecond,
+            settings.DurationSeconds),
+        slices);
+    AssertEx.True(timedOut.SubmittedThisRound);
+    AssertEx.Equal(slices[timedSlice].Points,
+        timedOut.RoundResult.BaseScore);
+    AssertEx.Equal(1f, timedOut.RoundResult.SpeedMultiplier);
 }
 
 void TestWheresBaldoPayload()
@@ -253,9 +362,10 @@ void TestMazeLayout()
     MazeLayout first = MazeGenerator.Generate(0x12345678u, 12);
     MazeLayout second = MazeGenerator.Generate(0x12345678u, 12);
     AssertEx.Equal(12, first.GridSize);
-    AssertEx.Equal(78, first.StartCell);
-    AssertEx.Equal(first.ExitCell, second.ExitCell);
-    AssertEx.Equal(first.ExitSide, second.ExitSide);
+    AssertEx.Equal(78, first.GoalCell);
+    AssertEx.Equal(first.StartCell, second.StartCell);
+    AssertEx.Equal(first.GoalCell, second.GoalCell);
+    AssertEx.Equal(first.EntranceSide, second.EntranceSide);
     AssertEx.SequenceEqual(first.Walls, second.Walls);
 
     int internalOpenings = 0;
@@ -281,30 +391,47 @@ void TestMazeLayout()
     AssertEx.Equal(143, internalOpenings);
     IReadOnlyList<int> path = FindMazeCellPath(first);
     AssertEx.Equal(first.StartCell, path[0]);
-    AssertEx.Equal(first.ExitCell, path[^1]);
+    AssertEx.Equal(first.GoalCell, path[^1]);
     AssertEx.Equal(144, CountReachableCells(first));
-    int exitColumn = first.ExitCell % first.GridSize;
-    int exitRow = first.ExitCell / first.GridSize;
+    int startColumn = first.StartCell % first.GridSize;
+    int startRow = first.StartCell / first.GridSize;
     AssertEx.True(
-        exitColumn == 0 ||
-        exitColumn == first.GridSize - 1 ||
-        exitRow == 0 ||
-        exitRow == first.GridSize - 1);
-    MazeWallMask exitWall = first.ExitSide switch
+        startColumn == 0 ||
+        startColumn == first.GridSize - 1 ||
+        startRow == 0 ||
+        startRow == first.GridSize - 1);
+    MazeWallMask entranceWall = first.EntranceSide switch
     {
-        MazeExitSide.North => MazeWallMask.North,
-        MazeExitSide.East => MazeWallMask.East,
-        MazeExitSide.South => MazeWallMask.South,
+        MazeEntranceSide.North => MazeWallMask.North,
+        MazeEntranceSide.East => MazeWallMask.East,
+        MazeEntranceSide.South => MazeWallMask.South,
         _ => MazeWallMask.West,
     };
     AssertEx.True(
-        ((MazeWallMask)first.Walls[first.ExitCell] & exitWall) == 0);
+        ((MazeWallMask)first.Walls[first.StartCell] & entranceWall) == 0);
+    MazePoint outsideStart = MazeGenerator.GetOutsideStartPosition(
+        first,
+        0.01875f,
+        0.0045f);
+    AssertEx.True(
+        outsideStart.X < 0f || outsideStart.X > 1f ||
+        outsideStart.Y < 0f || outsideStart.Y > 1f);
+    AssertEx.Equal(
+        MazeGenerator.GetCellCenter(first.GoalCell, first.GridSize),
+        MazeGenerator.GetCellCenter(78, first.GridSize));
 }
 
 void TestMazePayload()
 {
     MazeRound round = (MazeRound)new MazeMiniGame(
         new MazeSettings()).CreateRound(Context(1014, 71));
+    AssertEx.True(
+        round.StartPosition.X < 0f || round.StartPosition.X > 1f ||
+        round.StartPosition.Y < 0f || round.StartPosition.Y > 1f);
+    AssertEx.Equal(
+        MazeGenerator.GetCellCenter(round.Layout.GoalCell,
+            round.Layout.GridSize),
+        round.GoalPosition);
     round.ConfigureSession(15, 7, 20);
     Message message = round.CreateStartedMessage();
     try
@@ -313,12 +440,12 @@ void TestMazePayload()
         AssertEx.Equal(round.Layout.Seed, message.GetUInt());
         AssertEx.Equal((byte)12, message.GetByte());
         AssertEx.Equal((byte)round.Layout.StartCell, message.GetByte());
-        AssertEx.Equal((byte)round.Layout.ExitCell, message.GetByte());
-        AssertEx.Equal((byte)round.Layout.ExitSide, message.GetByte());
+        AssertEx.Equal((byte)round.Layout.GoalCell, message.GetByte());
+        AssertEx.Equal((byte)round.Layout.EntranceSide, message.GetByte());
         AssertEx.Equal(round.StartPosition.X, message.GetFloat());
         AssertEx.Equal(round.StartPosition.Y, message.GetFloat());
-        AssertEx.Equal(round.ExitPosition.X, message.GetFloat());
-        AssertEx.Equal(round.ExitPosition.Y, message.GetFloat());
+        AssertEx.Equal(round.GoalPosition.X, message.GetFloat());
+        AssertEx.Equal(round.GoalPosition.Y, message.GetFloat());
         AssertEx.Equal(0.01875f, message.GetFloat());
         AssertEx.Equal(0.0045f, message.GetFloat());
         AssertEx.Equal(0.02625f, message.GetFloat());
@@ -348,7 +475,7 @@ void TestMazeMovement()
         walls,
         4,
         5,
-        MazeExitSide.East);
+        MazeEntranceSide.East);
     MazeMovementSimulator blocked = new(blockedLayout, 0.025f, 0.006f);
     MazeMovementSimulator.Result collision = blocked.Move(
         new MazePoint(0.5f, 0.5f),
@@ -379,7 +506,7 @@ void TestMazeScoring()
     Riptide.Server server = new();
     IReadOnlyList<int> path = FindMazeCellPath(completed.Layout);
     float sampledAt = 0.05f;
-    foreach (int cell in path.Skip(1))
+    foreach (int cell in path)
     {
         SendMaze(
             completed,
@@ -389,12 +516,6 @@ void TestMazeScoring()
             sampledAt);
         sampledAt += 0.05f;
     }
-    SendMaze(
-        completed,
-        successfulPlayer,
-        server,
-        completed.ExitPosition,
-        sampledAt);
     AssertEx.True(successfulPlayer.SubmittedThisRound);
     AssertEx.Equal(100, successfulPlayer.RoundResult.BaseScore);
     AssertEx.True(successfulPlayer.RoundScore >= 100);
@@ -1188,6 +1309,17 @@ void SendWheresBaldo(
     finally { message.Release(); }
 }
 
+void SendWheelSpinner(
+    WheelSpinnerRound round,
+    PlayerSession player,
+    Riptide.Server server,
+    float stoppedAt)
+{
+    Message message = Message.Create().AddFloat(stoppedAt);
+    try { round.HandleInput(message, player, server); }
+    finally { message.Release(); }
+}
+
 void SendMaze(
     MazeRound round,
     PlayerSession player,
@@ -1213,7 +1345,7 @@ IReadOnlyList<int> FindMazeCellPath(MazeLayout layout)
     while (pending.Count > 0)
     {
         int cell = pending.Dequeue();
-        if (cell == layout.ExitCell)
+        if (cell == layout.GoalCell)
             break;
         foreach (int neighbor in GetOpenMazeNeighbors(layout, cell))
         {
@@ -1224,9 +1356,9 @@ IReadOnlyList<int> FindMazeCellPath(MazeLayout layout)
         }
     }
 
-    AssertEx.True(previous[layout.ExitCell] >= 0);
+    AssertEx.True(previous[layout.GoalCell] >= 0);
     List<int> path = new();
-    for (int cell = layout.ExitCell;
+    for (int cell = layout.GoalCell;
         cell != layout.StartCell;
         cell = previous[cell])
     {

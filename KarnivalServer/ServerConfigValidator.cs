@@ -75,6 +75,35 @@ public static class ServerConfigValidator
         ValidateMaze(value.Maze);
         ValidateSmackMan(value.SmackMan);
         ValidateWheresBaldo(value.WheresBaldo);
+        ValidateWheelSpinner(value.WheelSpinner);
+    }
+
+    private static void ValidateWheelSpinner(WheelSpinnerSettings value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        Positive(value.DurationSeconds, "WheelSpinner.DurationSeconds");
+        Positive(value.AngularSpeedDegreesPerSecond,
+            "WheelSpinner.AngularSpeedDegreesPerSecond");
+        ArgumentNullException.ThrowIfNull(value.Slices);
+        if (value.Slices.Length != WheelSpinnerMiniGame.SliceCount)
+            throw Error("WheelSpinner must contain exactly 10 slices.");
+
+        float totalArcDegrees = 0f;
+        for (int index = 0; index < value.Slices.Length; index++)
+        {
+            WheelSpinnerSliceSettings slice = value.Slices[index]
+                ?? throw Error($"WheelSpinner.Slices[{index}] must not be null.");
+            NonNegative(slice.Points,
+                $"WheelSpinner.Slices[{index}].Points");
+            Positive(slice.ArcDegrees,
+                $"WheelSpinner.Slices[{index}].ArcDegrees");
+            totalArcDegrees += slice.ArcDegrees;
+        }
+
+        if (Math.Abs(totalArcDegrees - 360f) > 0.001f)
+            throw Error("WheelSpinner slice arcs must total 360 degrees.");
+        Tolerances(value.InputGraceSeconds,
+            value.FutureInputToleranceSeconds, "WheelSpinner");
     }
 
     private static void ValidateWheresBaldo(WheresBaldoSettings value)

@@ -1,4 +1,4 @@
-public enum MazeExitSide : byte
+public enum MazeEntranceSide : byte
 {
     North = 0,
     East = 1,
@@ -33,8 +33,8 @@ public readonly record struct MazeLayout(
     int GridSize,
     byte[] Walls,
     int StartCell,
-    int ExitCell,
-    MazeExitSide ExitSide);
+    int GoalCell,
+    MazeEntranceSide EntranceSide);
 
 public readonly record struct MazeInputSample(
     MazePoint DesiredPosition,

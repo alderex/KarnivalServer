@@ -32,12 +32,12 @@ public static class MazeGenerator
             .Repeat((byte)MazeWallMask.All, cellCount)
             .ToArray();
         bool[] visited = new bool[cellCount];
-        int startCell =
+        int goalCell =
             ((gridSize / 2) * gridSize) + (gridSize / 2);
         Stack<int> stack = new();
         XorShiftRandom random = new(seed);
-        visited[startCell] = true;
-        stack.Push(startCell);
+        visited[goalCell] = true;
+        stack.Push(goalCell);
 
         while (stack.Count > 0)
         {
@@ -61,25 +61,25 @@ public static class MazeGenerator
         int[] distances = CalculateDistances(
             walls,
             gridSize,
-            startCell);
-        int exitCell = Enumerable.Range(0, cellCount)
+            goalCell);
+        int startCell = Enumerable.Range(0, cellCount)
             .Where(cell => IsPerimeter(cell, gridSize))
             .OrderByDescending(cell => distances[cell])
             .ThenBy(cell => cell)
             .First();
-        MazeExitSide exitSide = ChooseExitSide(
-            exitCell,
+        MazeEntranceSide entranceSide = ChooseEntranceSide(
+            startCell,
             gridSize,
             seed);
-        walls[exitCell] &= (byte)~SideToWall(exitSide);
+        walls[startCell] &= (byte)~SideToWall(entranceSide);
 
         return new MazeLayout(
             seed,
             gridSize,
             walls,
             startCell,
-            exitCell,
-            exitSide);
+            goalCell,
+            entranceSide);
     }
 
     public static MazePoint GetCellCenter(int cell, int gridSize)
@@ -91,25 +91,26 @@ public static class MazeGenerator
             (row + 0.5f) / gridSize);
     }
 
-    public static MazePoint GetExitCenter(
+    public static MazePoint GetOutsideStartPosition(
         MazeLayout layout,
         float playerRadius,
-        float exitRadius)
+        float wallThickness)
     {
         MazePoint cellCenter = GetCellCenter(
-            layout.ExitCell,
+            layout.StartCell,
             layout.GridSize);
         float outsideDistance =
             (0.5f / layout.GridSize) +
             Math.Max(0f, playerRadius) +
-            Math.Max(0f, exitRadius);
-        return layout.ExitSide switch
+            (Math.Max(0f, wallThickness) * 0.5f) +
+            0.001f;
+        return layout.EntranceSide switch
         {
-            MazeExitSide.North =>
+            MazeEntranceSide.North =>
                 new MazePoint(cellCenter.X, cellCenter.Y + outsideDistance),
-            MazeExitSide.East =>
+            MazeEntranceSide.East =>
                 new MazePoint(cellCenter.X + outsideDistance, cellCenter.Y),
-            MazeExitSide.South =>
+            MazeEntranceSide.South =>
                 new MazePoint(cellCenter.X, cellCenter.Y - outsideDistance),
             _ =>
                 new MazePoint(cellCenter.X - outsideDistance, cellCenter.Y),
@@ -182,32 +183,32 @@ public static class MazeGenerator
             row == gridSize - 1;
     }
 
-    private static MazeExitSide ChooseExitSide(
+    private static MazeEntranceSide ChooseEntranceSide(
         int cell,
         int gridSize,
         uint seed)
     {
         int column = cell % gridSize;
         int row = cell / gridSize;
-        List<MazeExitSide> sides = new(2);
+        List<MazeEntranceSide> sides = new(2);
         if (row == gridSize - 1)
-            sides.Add(MazeExitSide.North);
+            sides.Add(MazeEntranceSide.North);
         if (column == gridSize - 1)
-            sides.Add(MazeExitSide.East);
+            sides.Add(MazeEntranceSide.East);
         if (row == 0)
-            sides.Add(MazeExitSide.South);
+            sides.Add(MazeEntranceSide.South);
         if (column == 0)
-            sides.Add(MazeExitSide.West);
+            sides.Add(MazeEntranceSide.West);
         return sides[(int)((seed + (uint)cell) % (uint)sides.Count)];
     }
 
-    private static MazeWallMask SideToWall(MazeExitSide side)
+    private static MazeWallMask SideToWall(MazeEntranceSide side)
     {
         return side switch
         {
-            MazeExitSide.North => MazeWallMask.North,
-            MazeExitSide.East => MazeWallMask.East,
-            MazeExitSide.South => MazeWallMask.South,
+            MazeEntranceSide.North => MazeWallMask.North,
+            MazeEntranceSide.East => MazeWallMask.East,
+            MazeEntranceSide.South => MazeWallMask.South,
             _ => MazeWallMask.West,
         };
     }
