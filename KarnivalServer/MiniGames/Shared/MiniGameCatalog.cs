@@ -32,6 +32,7 @@ public sealed class MiniGameCatalog
             new SmackManMiniGame(config.MiniGames.SmackMan),
             new WheresBaldoMiniGame(config.MiniGames.WheresBaldo),
             new WheelSpinnerMiniGame(config.MiniGames.WheelSpinner),
+            new StepIntoTrafficMiniGame(config.MiniGames.StepIntoTraffic),
         });
     }
 

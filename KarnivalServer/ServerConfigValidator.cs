@@ -76,8 +76,38 @@ public static class ServerConfigValidator
         ValidateSmackMan(value.SmackMan);
         ValidateWheresBaldo(value.WheresBaldo);
         ValidateWheelSpinner(value.WheelSpinner);
+        ValidateStepIntoTraffic(value.StepIntoTraffic);
     }
 
+    private static void ValidateStepIntoTraffic(StepIntoTrafficSettings value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        Positive(value.DurationSeconds, "StepIntoTraffic.DurationSeconds");
+        Range(value.LaneCount, 1, byte.MaxValue, "StepIntoTraffic.LaneCount");
+        Positive(value.HopDurationSeconds, "StepIntoTraffic.HopDurationSeconds");
+        NonNegative(value.CollisionRecoverySeconds,
+            "StepIntoTraffic.CollisionRecoverySeconds");
+        OrderedRange(value.MinimumCarSpeedNormalizedPerSecond,
+            value.MaximumCarSpeedNormalizedPerSecond, 0.0001f, float.MaxValue,
+            "StepIntoTraffic car-speed range");
+        OrderedRange(value.MinimumSafeGapSeconds, value.MaximumSafeGapSeconds,
+            0.0001f, value.DurationSeconds, "StepIntoTraffic safe-gap range");
+        Range(value.CarHalfWidthNormalized, 0.001f, 0.5f,
+            "StepIntoTraffic.CarHalfWidthNormalized");
+        Range(value.CarHalfHeightRows, 0.001f, 0.5f,
+            "StepIntoTraffic.CarHalfHeightRows");
+        Range(value.PedestrianHalfWidthNormalized, 0.001f, 0.5f,
+            "StepIntoTraffic.PedestrianHalfWidthNormalized");
+        Range(value.PedestrianHalfHeightRows, 0.001f, 0.5f,
+            "StepIntoTraffic.PedestrianHalfHeightRows");
+        Positive(value.SimulationStepSeconds,
+            "StepIntoTraffic.SimulationStepSeconds");
+        NonNegative(value.CorrectScore, "StepIntoTraffic.CorrectScore");
+        Tolerances(value.InputGraceSeconds, value.FutureInputToleranceSeconds,
+            "StepIntoTraffic");
+        Positive(value.MaximumInputSamples,
+            "StepIntoTraffic.MaximumInputSamples");
+    }
     private static void ValidateWheelSpinner(WheelSpinnerSettings value)
     {
         ArgumentNullException.ThrowIfNull(value);

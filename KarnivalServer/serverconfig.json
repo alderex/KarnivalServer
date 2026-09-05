@@ -261,6 +261,25 @@
       "inputGraceSeconds": 0.5,
       "futureInputToleranceSeconds": 0.1
     },
+    "stepIntoTraffic": {
+      "durationSeconds": 15.0,
+      "laneCount": 6,
+      "hopDurationSeconds": 0.3,
+      "collisionRecoverySeconds": 0.75,
+      "minimumCarSpeedNormalizedPerSecond": 0.65,
+      "maximumCarSpeedNormalizedPerSecond": 0.95,
+      "minimumSafeGapSeconds": 1.5,
+      "maximumSafeGapSeconds": 2.5,
+      "carHalfWidthNormalized": 0.088,
+      "carHalfHeightRows": 0.224,
+      "pedestrianHalfWidthNormalized": 0.035,
+      "pedestrianHalfHeightRows": 0.24,
+      "simulationStepSeconds": 0.008333334,
+      "correctScore": 100,
+      "inputGraceSeconds": 0.5,
+      "futureInputToleranceSeconds": 0.1,
+      "maximumInputSamples": 64
+    },
     "wheelSpinner": {
       "durationSeconds": 10.0,
       "angularSpeedDegreesPerSecond": 240.0,

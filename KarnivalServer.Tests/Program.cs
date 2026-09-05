@@ -33,6 +33,8 @@ string clientRoot = args.Length > 1
     ("Where's Baldo validates selections and scores independently", TestWheresBaldoScoring),
     ("WheelSpinner payload and angle mapping are deterministic", TestWheelSpinnerPayloadAndAngles),
     ("WheelSpinner stop and timeout awards are authoritative", TestWheelSpinnerScoring),
+    ("Step Into Traffic schedules and payloads are deterministic", TestStepIntoTrafficPayload),
+    ("Step Into Traffic finish and timeout scoring are authoritative", TestStepIntoTrafficScoring),
     ("PotatoFace targets are deterministic and valid", TestPotatoFaceTargets),
     ("PotatoFace scoring rewards matching accuracy", TestPotatoFaceScoring),
     ("PotatoFace payload contains the target face", TestPotatoFacePayload),
@@ -117,10 +119,17 @@ void TestDefaultConfiguration()
     AssertEx.Equal(10, loaded.MiniGames.WheelSpinner.Slices.Length);
     AssertEx.Equal(360f,
         loaded.MiniGames.WheelSpinner.Slices.Sum(slice => slice.ArcDegrees));
+    AssertEx.Equal(15f, loaded.MiniGames.StepIntoTraffic.DurationSeconds);
+    AssertEx.Equal(6, loaded.MiniGames.StepIntoTraffic.LaneCount);
+    AssertEx.Equal(0.088f,
+        loaded.MiniGames.StepIntoTraffic.CarHalfWidthNormalized);
+    AssertEx.Equal(0.224f,
+        loaded.MiniGames.StepIntoTraffic.CarHalfHeightRows);
     MiniGameCatalog catalog = MiniGameCatalog.CreateDefault(loaded);
-    AssertEx.Equal(19, catalog.Count);
+    AssertEx.Equal(20, catalog.Count);
     AssertEx.True(catalog.TryGetGame("WheresBaldo", out _));
     AssertEx.True(catalog.TryGetGame("WheelSpinner", out _));
+    AssertEx.True(catalog.TryGetGame("StepIntoTraffic", out _));
 }
 
 void TestInvalidConfiguration()
@@ -207,7 +216,7 @@ void TestGeneratedProtocols()
     AssertEx.True(ProtocolCodeGenerator.Matches(
         Path.Combine(clientRoot, "Assets", "Scripts", "Networking", "KarnivalProtocol.cs"),
         expected));
-    AssertEx.Equal((ushort)40, KarnivalProtocol.Version);
+    AssertEx.Equal((ushort)41, KarnivalProtocol.Version);
 }
 
 void TestWheelSpinnerPayloadAndAngles()
@@ -292,6 +301,80 @@ void TestWheelSpinnerScoring()
     AssertEx.Equal(1f, timedOut.RoundResult.SpeedMultiplier);
 }
 
+void TestStepIntoTrafficPayload()
+{
+    StepIntoTrafficSettings settings = new();
+    StepIntoTrafficRound first = (StepIntoTrafficRound)new StepIntoTrafficMiniGame(settings)
+        .CreateRound(Context(1023, 74));
+    StepIntoTrafficRound second = (StepIntoTrafficRound)new StepIntoTrafficMiniGame(settings)
+        .CreateRound(Context(1023, 74));
+    AssertEx.Equal(6, first.Lanes.Count);
+    AssertEx.SequenceEqual(first.Lanes, second.Lanes);
+    for (int index = 0; index < first.Lanes.Count; index++)
+    {
+        StepIntoTrafficLane lane = first.Lanes[index];
+        AssertEx.Equal((byte)(index + 1), lane.LaneIndex);
+        AssertEx.Equal(index % 2 == 0, lane.MovesLeftToRight);
+        AssertEx.True(lane.SpeedNormalizedPerSecond >=
+            settings.MinimumCarSpeedNormalizedPerSecond);
+        AssertEx.True(lane.SpeedNormalizedPerSecond <=
+            settings.MaximumCarSpeedNormalizedPerSecond);
+    }
+
+    first.ConfigureSession(21, 5, 20);
+    Message message = first.CreateStartedMessage();
+    try
+    {
+        SkipStartedHeader(message, MiniGameType.StepIntoTraffic);
+        AssertEx.Equal(settings.HopDurationSeconds, message.GetFloat());
+        AssertEx.Equal(settings.CollisionRecoverySeconds, message.GetFloat());
+        AssertEx.Equal(settings.CarHalfWidthNormalized, message.GetFloat());
+        AssertEx.Equal(settings.CarHalfHeightRows, message.GetFloat());
+        AssertEx.Equal(settings.PedestrianHalfWidthNormalized, message.GetFloat());
+        AssertEx.Equal(settings.PedestrianHalfHeightRows, message.GetFloat());
+        AssertEx.Equal((byte)settings.LaneCount, message.GetByte());
+        foreach (StepIntoTrafficLane lane in first.Lanes)
+        {
+            AssertEx.Equal(lane.LaneIndex, message.GetByte());
+            AssertEx.Equal(lane.MovesLeftToRight, message.GetBool());
+            AssertEx.Equal(lane.SpeedNormalizedPerSecond, message.GetFloat());
+            AssertEx.Equal(lane.FirstCenterCrossingSeconds, message.GetFloat());
+            AssertEx.Equal(lane.CrossingIntervalSeconds, message.GetFloat());
+        }
+    }
+    finally
+    {
+        message.Release();
+    }
+}
+
+void TestStepIntoTrafficScoring()
+{
+    StepIntoTrafficSettings settings = new()
+    {
+        HopDurationSeconds = 0.1f,
+        InputGraceSeconds = 10f,
+        FutureInputToleranceSeconds = 10f,
+    };
+    DateTime startsUtc = DateTime.UtcNow.AddSeconds(-0.05f);
+    Riptide.Server server = new();
+    StepIntoTrafficRound finishedRound = new(
+        1024, startsUtc, settings.DurationSeconds, 4f,
+        Array.Empty<StepIntoTrafficLane>(), settings);
+    PlayerSession finished = new(22, 60, "finished", isSimulated: true);
+    SendStepIntoTraffic(finishedRound, finished, server, 0.1f);
+    SendStepIntoTraffic(finishedRound, finished, server, 0.25f);
+    AssertEx.True(finished.SubmittedThisRound);
+    AssertEx.Equal(settings.CorrectScore, finished.RoundResult.BaseScore);
+
+    StepIntoTrafficRound timedRound = new(
+        1025, startsUtc, settings.DurationSeconds, 4f,
+        Array.Empty<StepIntoTrafficLane>(), settings);
+    PlayerSession timedOut = new(23, 61, "timeout", isSimulated: true);
+    timedRound.FinalizeRound(new[] { timedOut }, server);
+    AssertEx.True(timedOut.SubmittedThisRound);
+    AssertEx.Equal(0, timedOut.RoundResult.BaseScore);
+}
 void TestWheresBaldoPayload()
 {
     AssertEx.Equal(100, WheresBaldoMiniGame.CharacterCount);
@@ -1320,6 +1403,16 @@ void SendWheelSpinner(
     finally { message.Release(); }
 }
 
+void SendStepIntoTraffic(
+    StepIntoTrafficRound round,
+    PlayerSession player,
+    Riptide.Server server,
+    float hoppedAt)
+{
+    Message message = Message.Create().AddFloat(hoppedAt);
+    try { round.HandleInput(message, player, server); }
+    finally { message.Release(); }
+}
 void SendMaze(
     MazeRound round,
     PlayerSession player,

@@ -1,5 +1,5 @@
 {
-  "version": 40,
+  "version": 41,
   "networkMessageIds": {
     "LoginRequest": 1,
     "LoginResult": 2,
@@ -38,6 +38,7 @@
     "Maze": 16,
     "SmackMan": 17,
     "WheresBaldo": 18,
-    "WheelSpinner": 19
+    "WheelSpinner": 19,
+    "StepIntoTraffic": 20
   }
 }
