@@ -42,6 +42,7 @@ string clientRoot = args.Length > 1
     ("SpotTheDifference payload contains authoritative scoring", TestSpotTheDifferencePayload),
     ("SpotTheDifference validates selections and scores partial progress", TestSpotTheDifferenceScoring),
     ("PlateStacker catches, misses, collapse, and scoring are authoritative", TestPlateStackerScoring),
+    ("PlateStacker evaluates delayed batches at each landing time", TestPlateStackerDelayedBatchEvaluation),
     ("Round-result metadata survives reconnect restore", TestRoundResultRestore),
     ("StopGo input history is bounded and coalesced", TestStopGoInputBounds),
     ("CarPark never targets a center parking space", TestCarParkTargetSelection),
@@ -201,6 +202,18 @@ void TestInvalidConfiguration()
                             ArcDegrees = 360f,
                         },
                     },
+                },
+            },
+        }));
+    AssertEx.Throws<InvalidDataException>(() =>
+        ServerConfigValidator.Validate(new ServerConfig
+        {
+            MiniGames = new MiniGameSettings
+            {
+                PlateStacker = new PlateStackerSettings
+                {
+                    PlateCount =
+                        PlateStackerSettings.MaximumSupportedPlateCount + 1,
                 },
             },
         }));
@@ -1078,6 +1091,47 @@ void TestPlateStackerScoring()
     AssertEx.Equal(0, collapsedPlayer.RoundScore);
 }
 
+void TestPlateStackerDelayedBatchEvaluation()
+{
+    DateTime startsUtc = DateTime.UtcNow;
+    PlateStackerSettings settings = new()
+    {
+        DurationSeconds = 2f,
+        PlateCount = 2,
+        FirstLandingSeconds = 0.25f,
+        LastLandingSeconds = 0.5f,
+        MinimumFallDurationSeconds = 0.2f,
+        MaximumFallDurationSeconds = 0.2f,
+        StackSpeedNormalizedPerSecond = 0.5f,
+        PlateWidthNormalized = 0.12f,
+        InputGraceSeconds = 0.5f,
+        PointsPerPlate = 10,
+    };
+    PlateStackerScheduleEntry[] schedule =
+    {
+        new(1, 0.625f, 0.05f, 0.25f, 0.2f),
+        new(2, 0.75f, 0.3f, 0.5f, 0.2f),
+    };
+    PlateStackerRound round = CreatePlateStackerRound(
+        1014,
+        startsUtc,
+        settings,
+        schedule);
+    PlayerSession player = new(11, 51, "delayed-stacker");
+    Riptide.Server server = new();
+    round.RegisterPlayer(player, startsUtc);
+    SendPlateStackerMovement(round, player, server, 1, 0f);
+
+    // One delayed server tick evaluates both plates. Each evaluation must use
+    // its own landing timestamp rather than the time of this update.
+    round.Update(
+        startsUtc.AddSeconds(1.2f),
+        new[] { player },
+        server);
+
+    AssertEx.Equal(20, player.RoundResult.BaseScore);
+}
+
 PlateStackerRound CreatePlateStackerRound(
     uint roundId,
     DateTime startsUtc,
@@ -1350,6 +1404,20 @@ void SkipStartedHeader(Message message, MiniGameType expectedType)
     message.GetFloat();
     message.GetFloat();
     message.GetFloat();
+}
+
+void SendPlateStackerMovement(
+    PlateStackerRound round,
+    PlayerSession player,
+    Riptide.Server server,
+    sbyte direction,
+    float sampledAt)
+{
+    Message message = Message.Create()
+        .AddSByte(direction)
+        .AddFloat(sampledAt);
+    try { round.HandleInput(message, player, server); }
+    finally { message.Release(); }
 }
 
 void SendStopGo(StopGoRound round, PlayerSession player, Riptide.Server server,

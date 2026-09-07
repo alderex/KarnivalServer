@@ -409,7 +409,9 @@ public static class ServerConfigValidator
     {
         ArgumentNullException.ThrowIfNull(value);
         Positive(value.DurationSeconds, "PlateStacker.DurationSeconds");
-        Range(value.PlateCount, 1, ushort.MaxValue, "PlateStacker.PlateCount");
+        Range(value.PlateCount, 1,
+            PlateStackerSettings.MaximumSupportedPlateCount,
+            "PlateStacker.PlateCount");
         OrderedRange(value.FirstLandingSeconds, value.LastLandingSeconds,
             0f, value.DurationSeconds, "PlateStacker landing range");
         OrderedRange(value.MinimumFallDurationSeconds,

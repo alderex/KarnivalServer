@@ -12,7 +12,10 @@ public sealed class PlateStackerMiniGame : IMiniGame
     public MiniGameRoundBase CreateRound(MiniGameRoundStartContext context)
     {
         float durationSeconds = Math.Max(1f, settings.DurationSeconds);
-        int plateCount = Math.Clamp(settings.PlateCount, 1, ushort.MaxValue);
+        int plateCount = Math.Clamp(
+            settings.PlateCount,
+            1,
+            PlateStackerSettings.MaximumSupportedPlateCount);
         float firstLandingSeconds = Math.Clamp(
             settings.FirstLandingSeconds,
             0.1f,

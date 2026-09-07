@@ -109,7 +109,6 @@ public sealed class PlateStackerRound : MiniGameRoundBase
                         session,
                         state,
                         entry,
-                        elapsedSeconds,
                         server);
                     if (state.Collapsed)
                         break;
@@ -200,7 +199,6 @@ public sealed class PlateStackerRound : MiniGameRoundBase
                         session,
                         state,
                         entry,
-                        DurationSeconds,
                         server);
                 if (state.Collapsed)
                     break;
@@ -251,7 +249,6 @@ public sealed class PlateStackerRound : MiniGameRoundBase
         PlayerSession session,
         PlayerState state,
         PlateStackerScheduleEntry entry,
-        float evaluatedAtSeconds,
         Riptide.Server server)
     {
         AdvanceTo(state, entry.LandingSeconds);
@@ -279,10 +276,11 @@ public sealed class PlateStackerRound : MiniGameRoundBase
                 Math.Max(0.01f, settings.CollapseOffsetPlateWidths));
         }
 
+        // Keep the simulation cursor at this landing. Advancing it to the
+        // current server tick would make a delayed batch evaluate subsequent
+        // plates at the wrong, later position.
         state.LastLandingSeconds = entry.LandingSeconds;
         state.EvaluatedPlateIds.Add(entry.PlateId);
-        if (!state.Collapsed)
-            AdvanceTo(state, evaluatedAtSeconds);
         int score = state.Collapsed ? 0 : GetScore(state);
         SendOutcome(
             session,
@@ -445,7 +443,10 @@ public sealed class PlateStackerRound : MiniGameRoundBase
     private static int GetMaximumScore(PlateStackerSettings settings)
     {
         long maximumScore =
-            (long)Math.Max(1, settings.PlateCount) *
+            (long)Math.Clamp(
+                settings.PlateCount,
+                1,
+                PlateStackerSettings.MaximumSupportedPlateCount) *
             Math.Max(0, settings.PointsPerPlate);
         return (int)Math.Min(maximumScore, int.MaxValue);
     }

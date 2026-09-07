@@ -1,5 +1,7 @@
 public sealed class PlateStackerSettings
 {
+    public const int MaximumSupportedPlateCount = 10;
+
     public float DurationSeconds { get; init; } = 10f;
     public int PlateCount { get; init; } = 10;
     public float FirstLandingSeconds { get; init; } = 1.5f;
