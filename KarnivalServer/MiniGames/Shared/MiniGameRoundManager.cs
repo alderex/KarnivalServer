@@ -70,6 +70,7 @@ public sealed class MiniGameRoundManager
     private readonly Dictionary<long, SessionParticipant> participants = new();
     private readonly HashSet<MiniGameType> gamesPlayedInPass = new();
     private readonly HashSet<ushort> readyClientIds = new();
+    private readonly HashSet<long> waitingUserIds = new();
     private readonly Dictionary<MiniGameType, int> sessionGamePlayCounts = new();
     private readonly Dictionary<long, BettingEntry> bettingEntries = new();
     private readonly Dictionary<long, int> roundBetLosses = new();
@@ -169,13 +170,18 @@ public sealed class MiniGameRoundManager
             return;
         }
 
+        bool waitForNextGame =
+            Phase is SessionLifecyclePhase.Round or SessionLifecyclePhase.Results;
+        if (waitForNextGame)
+            waitingUserIds.Add(session.UserId);
+
         if (participants.TryGetValue(session.UserId, out SessionParticipant? participant))
         {
             participant.LifetimeWins = session.LifetimeWins;
             session.RestoreSessionScore(participant.Score);
             session.RestoreRoundState(participant.RoundResult);
         }
-        else if (Phase != SessionLifecyclePhase.Victory)
+        else if (Phase != SessionLifecyclePhase.Victory && !waitForNextGame)
         {
             participants.Add(
                 session.UserId,
@@ -200,8 +206,12 @@ public sealed class MiniGameRoundManager
 
     public void OnHumanDisconnected(PlayerSession session)
     {
-        if (Phase == SessionLifecyclePhase.Round && CurrentRound != null)
+        if (Phase == SessionLifecyclePhase.Round &&
+            CurrentRound != null &&
+            !IsWaiting(session))
+        {
             CurrentRound.UnregisterPlayer(session, DateTime.UtcNow, server);
+        }
 
         if (participants.TryGetValue(session.UserId, out SessionParticipant? participant))
         {
@@ -261,7 +271,8 @@ public sealed class MiniGameRoundManager
                 CurrentRound.RoundId == readyRoundId &&
                 CurrentRound.GameType == readyGameType &&
                 sessions.TryGetValue(clientId, out PlayerSession? readySession) &&
-                !readySession.IsSimulated)
+                !readySession.IsSimulated &&
+                !IsWaiting(readySession))
                 readyClientIds.Add(clientId);
             return true;
         }
@@ -280,6 +291,7 @@ public sealed class MiniGameRoundManager
             CurrentRound.GameType != gameType ||
             !sessions.TryGetValue(clientId, out PlayerSession? session) ||
             session.IsSimulated ||
+            IsWaiting(session) ||
             session.SubmittedThisRound)
         {
             return true;
@@ -295,6 +307,9 @@ public sealed class MiniGameRoundManager
         if (session.IsSimulated)
             return false;
 
+        if (IsWaiting(session))
+            return true;
+
         return Phase == SessionLifecyclePhase.Lobby ||
             Phase == SessionLifecyclePhase.Betting ||
             Phase == SessionLifecyclePhase.Victory ||
@@ -304,6 +319,13 @@ public sealed class MiniGameRoundManager
 
     public void SendCurrentPhase(ushort clientId, DateTime nowUtc)
     {
+        if (sessions.TryGetValue(clientId, out PlayerSession? currentSession) &&
+            IsWaiting(currentSession))
+        {
+            SendWaiting(clientId);
+            return;
+        }
+
         switch (Phase)
         {
             case SessionLifecyclePhase.Lobby:
@@ -355,6 +377,7 @@ public sealed class MiniGameRoundManager
         Phase = SessionLifecyclePhase.Idle;
         CurrentRound = null;
         readyClientIds.Clear();
+        waitingUserIds.Clear();
         queuedNextGame = null;
         gamesPlayedInPass.Clear();
         sessionGamePlayCounts.Clear();
@@ -414,7 +437,7 @@ public sealed class MiniGameRoundManager
             return false;
         }
 
-        foreach (PlayerSession session in ConnectedHumans())
+        foreach (PlayerSession session in ParticipatingHumans())
             SyncParticipantScore(session);
 
         RefundAndClearBets();
@@ -475,6 +498,7 @@ public sealed class MiniGameRoundManager
         winners = Array.Empty<SessionParticipant>();
         winningScore = 0;
         sessionRoundNumber = 0;
+        waitingUserIds.Clear();
 
         foreach (PlayerSession session in sessions.Values)
         {
@@ -529,6 +553,7 @@ public sealed class MiniGameRoundManager
     }
     private void StartNextRound(DateTime nowUtc)
     {
+        AdmitWaitingPlayers();
         roundBetLosses.Clear();
         cachedRoundResults = Array.Empty<LeaderboardEntry>();
         sessionRoundNumber++;
@@ -556,7 +581,7 @@ public sealed class MiniGameRoundManager
         RiptideConsoleLogger.Info(
             $"Session {SessionId} round {sessionRoundNumber}/{TotalRounds} preparing. " +
             $"NetworkRound={CurrentRound.RoundId} Game={CurrentRound.GameType} {CurrentRound.Describe()}.");
-        foreach (PlayerSession session in ConnectedHumans())
+        foreach (PlayerSession session in ParticipatingHumans())
             server.Send(CurrentRound.CreateStartedMessage(), session.ClientId);
     }
 
@@ -567,7 +592,7 @@ public sealed class MiniGameRoundManager
 
         if (!CurrentRound.IsStartScheduled)
         {
-            PlayerSession[] humans = ConnectedHumans().ToArray();
+            PlayerSession[] humans = ParticipatingHumans().ToArray();
             if (humans.All(session => readyClientIds.Contains(session.ClientId)) ||
                 nowUtc >= phaseEndsUtc)
                 StartRoundCountdown(nowUtc);
@@ -595,7 +620,7 @@ public sealed class MiniGameRoundManager
 
         RiptideConsoleLogger.Info(
             $"Session {SessionId} round {sessionRoundNumber}/{TotalRounds} countdown started.");
-        foreach (PlayerSession session in ConnectedHumans())
+        foreach (PlayerSession session in ParticipatingHumans())
             server.Send(CurrentRound.CreateCountdownMessage(), session.ClientId);
     }
 
@@ -613,7 +638,7 @@ public sealed class MiniGameRoundManager
             simulatedPlayers.CompleteRound(CurrentRound.MaximumScore);
         if (bettingTargetRoundNumber == sessionRoundNumber)
             ResolveBets();
-        foreach (PlayerSession session in ConnectedHumans())
+        foreach (PlayerSession session in ParticipatingHumans())
             SyncParticipantScore(session);
         CurrentRound.MarkResults(nowUtc);
         cachedRoundResults = BuildLeaderboardEntries()
@@ -627,7 +652,7 @@ public sealed class MiniGameRoundManager
         RiptideConsoleLogger.Info(
             $"Session {SessionId} round {sessionRoundNumber}/{TotalRounds} finished. " +
             (isFinalRound ? "Final summary." : $"Next game={queuedNextGame!.GameType}."));
-        foreach (PlayerSession recipient in ConnectedHumans())
+        foreach (PlayerSession recipient in ParticipatingHumans())
             SendResults(recipient.ClientId);
 
         foreach (SimulatedPlayerChat chat in simulatedChats)
@@ -642,6 +667,7 @@ public sealed class MiniGameRoundManager
             return;
         }
 
+        AdmitWaitingPlayers();
         bettingEntries.Clear();
         bettingTargetRoundNumber = (ushort)(sessionRoundNumber + 1);
         CreateBettingEntries();
@@ -799,7 +825,7 @@ public sealed class MiniGameRoundManager
         RiptideConsoleLogger.Info(
             $"Session {SessionId} won by {string.Join(", ", winners.Select(winner => winner.Username))} " +
             $"with {winningScore} points.");
-        foreach (PlayerSession session in ConnectedHumans())
+        foreach (PlayerSession session in ParticipatingHumans())
             SendVictory(session.ClientId, nowUtc);
         foreach (SessionParticipant winner in winners)
             SystemChatRequested?.Invoke(CreateWinnerMessage(winner));
@@ -828,6 +854,15 @@ public sealed class MiniGameRoundManager
             0f,
             Math.Max(0.1f, config.LobbyDurationSeconds)));
         message.AddUShort(TotalRounds);
+        server.Send(message, clientId);
+    }
+
+    private void SendWaiting(ushort clientId)
+    {
+        Message message = Message.Create(
+            MessageSendMode.Reliable,
+            NetworkMessageId.SessionWaiting);
+        message.AddUInt(SessionId);
         server.Send(message, clientId);
     }
 
@@ -1057,10 +1092,47 @@ public sealed class MiniGameRoundManager
         return sessions.Values.Where(session => !session.IsSimulated).ToList();
     }
 
+    private IEnumerable<PlayerSession> ParticipatingHumans()
+    {
+        return sessions.Values.Where(session =>
+            !session.IsSimulated &&
+            !IsWaiting(session));
+    }
+
+    private bool IsWaiting(PlayerSession session) =>
+        waitingUserIds.Contains(session.UserId);
+
+    private void AdmitWaitingPlayers()
+    {
+        if (waitingUserIds.Count == 0)
+            return;
+
+        foreach (PlayerSession session in ConnectedHumans())
+        {
+            if (!waitingUserIds.Contains(session.UserId) ||
+                participants.ContainsKey(session.UserId))
+            {
+                continue;
+            }
+
+            participants.Add(
+                session.UserId,
+                new SessionParticipant(
+                    session.UserId,
+                    session.Username,
+                    session.LifetimeWins,
+                    session.TotalScore));
+        }
+
+        waitingUserIds.Clear();
+        lobbyRosterDirty = true;
+    }
+
     private IEnumerable<PlayerSession> RoundSessions(MiniGameRoundBase round)
     {
         return round.IncludesSimulatedPlayers
-            ? sessions.Values.ToArray()
-            : ConnectedHumans();
+            ? sessions.Values.Where(session =>
+                session.IsSimulated || !IsWaiting(session)).ToArray()
+            : ParticipatingHumans();
     }
 }

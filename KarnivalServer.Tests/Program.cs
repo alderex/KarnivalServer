@@ -15,6 +15,8 @@ string clientRoot = args.Length > 1
     ("Default configuration is valid", TestDefaultConfiguration),
     ("Invalid configurations fail early", TestInvalidConfiguration),
     ("Generated protocols match the schema", TestGeneratedProtocols),
+    ("Mid-round logins wait and can chat until the next game",
+        TestMidRoundLoginWaitsForNextGame),
     ("Maze layouts are deterministic, connected, and perfect", TestMazeLayout),
     ("Maze payload contains the authoritative layout", TestMazePayload),
     ("Maze movement blocks walls and slides along them", TestMazeMovement),
@@ -46,6 +48,11 @@ string clientRoot = args.Length > 1
     ("Round-result metadata survives reconnect restore", TestRoundResultRestore),
     ("StopGo input history is bounded and coalesced", TestStopGoInputBounds),
     ("CarPark never targets a center parking space", TestCarParkTargetSelection),
+    ("CarPark collision footprint is inset from the car artwork",
+        TestCarParkCollisionFootprint),
+    ("CarPark centered angled entry is accepted", TestCarParkParkingCapture),
+    ("CarPark inset hitboxes allow clearance without permitting overlap",
+        TestCarParkInsetCollision),
     ("CarPark input history is bounded and coalesced", TestCarParkInputBounds),
 };
 
@@ -126,6 +133,8 @@ void TestDefaultConfiguration()
         loaded.MiniGames.StepIntoTraffic.CarHalfWidthNormalized);
     AssertEx.Equal(0.224f,
         loaded.MiniGames.StepIntoTraffic.CarHalfHeightRows);
+    AssertEx.Equal(0.181f,
+        loaded.MiniGames.FallingObjectCatcher.CatchWindowFallDurationFraction);
     MiniGameCatalog catalog = MiniGameCatalog.CreateDefault(loaded);
     AssertEx.Equal(20, catalog.Count);
     AssertEx.True(catalog.TryGetGame("WheresBaldo", out _));
@@ -229,7 +238,58 @@ void TestGeneratedProtocols()
     AssertEx.True(ProtocolCodeGenerator.Matches(
         Path.Combine(clientRoot, "Assets", "Scripts", "Networking", "KarnivalProtocol.cs"),
         expected));
-    AssertEx.Equal((ushort)41, KarnivalProtocol.Version);
+    AssertEx.Equal((ushort)42, KarnivalProtocol.Version);
+    AssertEx.Equal((ushort)18, (ushort)NetworkMessageId.SessionWaiting);
+}
+
+void TestMidRoundLoginWaitsForNextGame()
+{
+    string testDirectory = Path.Combine(
+        Path.GetTempPath(),
+        $"karnival-waiting-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(testDirectory);
+    try
+    {
+        ServerConfig config = new()
+        {
+            SessionRoundCount = 2,
+            LobbyDurationSeconds = 60f,
+        };
+        Dictionary<ushort, PlayerSession> sessions = new();
+        Riptide.Server server = new();
+        MiniGameRoundManager manager = new(
+            config,
+            new Random(17),
+            sessions,
+            server,
+            new MiniGameCatalog(new IMiniGame[]
+            {
+                new SliderTargetMiniGame(config.MiniGames.SliderTarget),
+            }),
+            new SqliteAccountPersistence(
+                Path.Combine(testDirectory, "waiting.db")));
+
+        DateTime nowUtc = DateTime.UtcNow;
+        PlayerSession firstPlayer = new(1, 101, "first");
+        sessions.Add(firstPlayer.ClientId, firstPlayer);
+        manager.OnHumanLoggedIn(firstPlayer, nowUtc);
+        AssertEx.True(manager.TryStartSessionNow(nowUtc, out _));
+        AssertEx.Equal(SessionLifecyclePhase.Round, manager.Phase);
+
+        PlayerSession waitingPlayer = new(2, 202, "waiting");
+        sessions.Add(waitingPlayer.ClientId, waitingPlayer);
+        manager.OnHumanLoggedIn(waitingPlayer, nowUtc);
+        AssertEx.True(manager.CanChat(waitingPlayer));
+
+        AssertEx.True(manager.TrySkipToFinalRound(nowUtc, out _));
+        AssertEx.Equal(SessionLifecyclePhase.Round, manager.Phase);
+        AssertEx.True(!manager.CanChat(waitingPlayer));
+    }
+    finally
+    {
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        Directory.Delete(testDirectory, true);
+    }
 }
 
 void TestWheelSpinnerPayloadAndAngles()
@@ -945,10 +1005,10 @@ void TestFallingPayload()
         float lastCatch = message.GetFloat();
         float minimumFall = message.GetFloat();
         float maximumFall = message.GetFloat();
-        message.GetFloat();
-        message.GetFloat();
-        message.GetFloat();
-        message.GetFloat();
+        AssertEx.Equal(0.8f, message.GetFloat());
+        AssertEx.Equal(0.06f, message.GetFloat());
+        AssertEx.Equal(0.06f, message.GetFloat());
+        AssertEx.Equal(0.181f, message.GetFloat());
         int count = message.GetUShort();
         FallingObjectScheduleEntry[] expected = FallingObjectScheduleGenerator.Generate(
             target, seed, targets, distractors, firstCatch, lastCatch, minimumFall, maximumFall);
@@ -1387,6 +1447,114 @@ void TestCarParkTargetSelection()
                 AssertEx.True(targetSpot != spotCount / 2);
         }
     }
+}
+
+void TestCarParkCollisionFootprint()
+{
+    CarParkSettings settings = new();
+    CarParkRound round = (CarParkRound)new CarParkMiniGame(settings)
+        .CreateRound(Context(2001, 17));
+    FieldInfo emptySpotField = typeof(CarParkRound).GetField(
+        "emptySpot", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("CarPark emptySpot field was not found.");
+    MethodInfo evaluatePose = typeof(CarParkRound).GetMethod(
+        "EvaluatePose", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("CarPark EvaluatePose was not found.");
+    byte emptySpot = (byte)(emptySpotField.GetValue(round)
+        ?? throw new InvalidOperationException("CarPark emptySpot is null."));
+    int parkedSlot = emptySpot == 0 ? 1 : 0;
+    float parkedX = settings.FirstParkingX +
+        ((settings.LastParkingX - settings.FirstParkingX) * parkedSlot /
+            (settings.ParkingSpotCount - 1));
+
+    object? separated = evaluatePose.Invoke(round, new object[]
+    {
+        new CarParkPose(parkedX, settings.ParkingRowY - 0.22f, 0f),
+    });
+    object? touching = evaluatePose.Invoke(round, new object[]
+    {
+        new CarParkPose(parkedX, settings.ParkingRowY - 0.2f, 0f),
+    });
+
+    AssertEx.True(separated is null);
+    AssertEx.Equal(CarParkOutcomeReason.Collision,
+        (CarParkOutcomeReason)(touching
+            ?? throw new InvalidOperationException("Expected a collision.")));
+}
+
+void TestCarParkParkingCapture()
+{
+    CarParkSettings settings = new();
+    CarParkRound round = (CarParkRound)new CarParkMiniGame(settings)
+        .CreateRound(Context(2002, 23));
+    FieldInfo emptySpotField = typeof(CarParkRound).GetField(
+        "emptySpot", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("CarPark emptySpot field was not found.");
+    MethodInfo evaluatePose = typeof(CarParkRound).GetMethod(
+        "EvaluatePose", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("CarPark EvaluatePose was not found.");
+    byte emptySpot = (byte)(emptySpotField.GetValue(round)
+        ?? throw new InvalidOperationException("CarPark emptySpot is null."));
+    float targetX = settings.FirstParkingX +
+        ((settings.LastParkingX - settings.FirstParkingX) * emptySpot /
+            (settings.ParkingSpotCount - 1));
+
+    object? early = evaluatePose.Invoke(round, new object[]
+    {
+        new CarParkPose(
+            targetX,
+            settings.ParkingRowY - 0.05f,
+            15f),
+    });
+    object? result = evaluatePose.Invoke(round, new object[]
+    {
+        new CarParkPose(targetX, settings.ParkingRowY, 15f),
+    });
+
+    AssertEx.True(early is null);
+    AssertEx.Equal(CarParkOutcomeReason.Parked,
+        (CarParkOutcomeReason)(result
+            ?? throw new InvalidOperationException("Expected the car to park.")));
+}
+
+void TestCarParkInsetCollision()
+{
+    CarParkSettings settings = new();
+    CarParkRound round = (CarParkRound)new CarParkMiniGame(settings)
+        .CreateRound(Context(2003, 29));
+    FieldInfo emptySpotField = typeof(CarParkRound).GetField(
+        "emptySpot", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("CarPark emptySpot field was not found.");
+    MethodInfo evaluatePose = typeof(CarParkRound).GetMethod(
+        "EvaluatePose", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("CarPark EvaluatePose was not found.");
+    byte emptySpot = (byte)(emptySpotField.GetValue(round)
+        ?? throw new InvalidOperationException("CarPark emptySpot is null."));
+    float targetX = settings.FirstParkingX +
+        ((settings.LastParkingX - settings.FirstParkingX) * emptySpot /
+            (settings.ParkingSpotCount - 1));
+    int parkedSlot = emptySpot == 0 ? 1 : emptySpot - 1;
+    float parkedX = settings.FirstParkingX +
+        ((settings.LastParkingX - settings.FirstParkingX) * parkedSlot /
+            (settings.ParkingSpotCount - 1));
+
+    object? maneuvering = evaluatePose.Invoke(round, new object[]
+    {
+        new CarParkPose(targetX, settings.ParkingRowY, 30f),
+    });
+    float towardParkedCar = MathF.Sign(parkedX - targetX);
+    object? overlapping = evaluatePose.Invoke(round, new object[]
+    {
+        new CarParkPose(
+            targetX + (towardParkedCar * 0.15f),
+            settings.ParkingRowY,
+            30f),
+    });
+
+    AssertEx.True(maneuvering is null);
+    AssertEx.Equal(CarParkOutcomeReason.Collision,
+        (CarParkOutcomeReason)(overlapping
+            ?? throw new InvalidOperationException("Expected a collision.")));
 }
 
 MiniGameRoundStartContext Context(uint roundId, int seed) =>

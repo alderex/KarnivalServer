@@ -10,7 +10,7 @@ public sealed class FallingObjectCatcherSettings
     public float CatcherSpeedNormalizedPerSecond { get; init; } = 0.8f;
     public float CatcherHalfWidthNormalized { get; init; } = 0.06f;
     public float CatchToleranceNormalized { get; init; } = 0.06f;
-    public float CatchWindowFallDurationFraction { get; init; } = 0.4f;
+    public float CatchWindowFallDurationFraction { get; init; } = 0.181f;
     public float InputGraceSeconds { get; init; } = 0.5f;
     public float FutureInputToleranceSeconds { get; init; } = 0.1f;
     public int CorrectCatchPoints { get; init; } = 10;

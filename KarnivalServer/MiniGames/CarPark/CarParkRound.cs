@@ -2,6 +2,8 @@ using Riptide;
 
 public sealed class CarParkRound : MiniGameRoundBase
 {
+    private const float ParkingCenterToleranceFraction = 0.5f;
+
     private const byte TerminalOutcomeEvent = 1;
 
     private sealed class PlayerState
@@ -273,13 +275,16 @@ public sealed class CarParkRound : MiniGameRoundBase
 
     private bool IsParked(CarParkPose pose)
     {
-        GetWorldExtents(pose.HeadingDegrees, out float extentX, out float extentY);
+        float targetY = settings.ParkingRowY;
         return MathF.Abs(NormalizeAngle(pose.HeadingDegrees)) <=
                 Math.Clamp(settings.ParkingAngleToleranceDegrees, 0f, 90f) &&
-            MathF.Abs(pose.X - GetSpotX(emptySpot)) + extentX <=
-                Math.Max(0.01f, settings.ParkingHalfWidth) &&
-            MathF.Abs(pose.Y - settings.ParkingRowY) + extentY <=
-                Math.Max(0.01f, settings.ParkingHalfHeight);
+            MathF.Abs(pose.X - GetSpotX(emptySpot)) <=
+                Math.Max(0.01f, settings.ParkingHalfWidth) *
+                    ParkingCenterToleranceFraction &&
+            pose.Y >= targetY &&
+            pose.Y - targetY <=
+                Math.Max(0.01f, settings.ParkingHalfHeight) *
+                    ParkingCenterToleranceFraction;
     }
 
     private bool IntersectsParkedCar(CarParkPose pose, float parkedX)

@@ -12,10 +12,10 @@ public sealed class CarParkSettings
     public float ParkingRowY { get; init; } = 0.58f;
     public float FirstParkingX { get; init; } = -0.72f;
     public float LastParkingX { get; init; } = 0.72f;
-    public float ParkingHalfWidth { get; init; } = 0.14f;
-    public float ParkingHalfHeight { get; init; } = 0.3f;
-    public float CarHalfWidth { get; init; } = 0.08701172f;
-    public float CarHalfHeight { get; init; } = 0.234375f;
+    public float ParkingHalfWidth { get; init; } = 0.18857143f;
+    public float ParkingHalfHeight { get; init; } = 0.165f;
+    public float CarHalfWidth { get; init; } = 0.12964286f;
+    public float CarHalfHeight { get; init; } = 0.103125f;
     public float BoundsHalfWidth { get; init; } = 1f;
     public float BoundsHalfHeight { get; init; } = 1f;
     public float ParkingAngleToleranceDegrees { get; init; } = 18f;

@@ -1,5 +1,5 @@
 {
-  "version": 41,
+  "version": 42,
   "networkMessageIds": {
     "LoginRequest": 1,
     "LoginResult": 2,
@@ -17,7 +17,8 @@
     "MiniGameCountdown": 14,
     "SessionBettingState": 15,
     "SessionBettingUpdate": 16,
-    "SessionBet": 17
+    "SessionBet": 17,
+    "SessionWaiting": 18
   },
   "miniGameTypes": {
     "SliderTarget": 1,
