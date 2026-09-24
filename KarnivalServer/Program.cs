@@ -19,6 +19,7 @@ Console.CancelKeyPress += (_, eventArgs) =>
 };
 
 RiptideConsoleLogger.Initialize();
+RiptideConsoleLogger.Info($"Startup: Karnival server protocol version {KarnivalProtocol.Version}.");
 
 Server server = new(config);
 server.Run(shutdown.Token);
