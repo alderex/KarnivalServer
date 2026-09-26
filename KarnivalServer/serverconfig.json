@@ -222,6 +222,7 @@
       "maximumFallDurationSeconds": 1.4,
       "stackSpeedNormalizedPerSecond": 0.8,
       "plateWidthNormalized": 0.12,
+      "startingPlateWidthNormalized": 0.15,
       "collapseOffsetPlateWidths": 1.5,
       "inputGraceSeconds": 0.5,
       "futureInputToleranceSeconds": 0.1,

@@ -2,7 +2,6 @@ using Riptide;
 
 public abstract class MiniGameRoundBase
 {
-    private const float EarlyFinishThresholdSeconds = 1f;
     private const float MaximumEarlyFinishMultiplier = 3f;
 
     protected MiniGameRoundBase(
@@ -33,6 +32,9 @@ public abstract class MiniGameRoundBase
     public float DurationSeconds { get; }
     public float ResultsDurationSeconds { get; }
     public int MaximumScore { get; }
+
+    // Scheduled games may exhaust all opportunities before the round timer.
+    protected virtual float SpeedBonusDurationSeconds => DurationSeconds;
     public RoundPhase Phase { get; private set; }
     public DateTime EndsUtc => StartsUtc.AddSeconds(DurationSeconds);
     public virtual DateTime SubmissionDeadlineUtc => EndsUtc;
@@ -189,13 +191,12 @@ public abstract class MiniGameRoundBase
 
     private float GetSpeedMultiplier(float completedAtSeconds)
     {
-        float remainingSeconds = Math.Max(0f, DurationSeconds - completedAtSeconds);
-        if (remainingSeconds <= EarlyFinishThresholdSeconds ||
-            DurationSeconds <= EarlyFinishThresholdSeconds)
+        float bonusDuration = Math.Clamp(SpeedBonusDurationSeconds, 0f, DurationSeconds);
+        float remainingSeconds = Math.Max(0f, bonusDuration - completedAtSeconds);
+        if (bonusDuration <= 0f)
             return 1f;
 
-        float bonusProgress = (remainingSeconds - EarlyFinishThresholdSeconds) /
-            (DurationSeconds - EarlyFinishThresholdSeconds);
+        float bonusProgress = remainingSeconds / bonusDuration;
         return 1f + ((MaximumEarlyFinishMultiplier - 1f) *
             Math.Clamp(bonusProgress, 0f, 1f));
     }

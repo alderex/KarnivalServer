@@ -10,6 +10,7 @@ public sealed class PlateStackerSettings
     public float MaximumFallDurationSeconds { get; init; } = 1.4f;
     public float StackSpeedNormalizedPerSecond { get; init; } = 0.8f;
     public float PlateWidthNormalized { get; init; } = 0.12f;
+    public float StartingPlateWidthNormalized { get; init; } = 0.15f;
     public float CollapseOffsetPlateWidths { get; init; } = 1.5f;
     public float InputGraceSeconds { get; init; } = 0.5f;
     public float FutureInputToleranceSeconds { get; init; } = 0.1f;

@@ -4,6 +4,22 @@ public sealed class PlateStackerRound : MiniGameRoundBase
 {
     private const byte PlateOutcomeEvent = 1;
 
+    // Presentation-space geometry, validated against the Unity scene.
+    public const float SpawnY = 248f;
+    public const float FirstContactY = -130f;
+    public const float StackSpacing = 22f;
+    public const float ExitY = -247f;
+
+    public static float FallSpeed(PlateStackerScheduleEntry entry) =>
+        (SpawnY - FirstContactY) / Math.Max(0.1f, entry.FallDurationSeconds);
+
+    public static float ContactSeconds(PlateStackerScheduleEntry entry, int caughtCount) =>
+        entry.SpawnSeconds +
+        (SpawnY - FirstContactY - caughtCount * StackSpacing) / FallSpeed(entry);
+
+    public static float ExitSeconds(PlateStackerScheduleEntry entry) =>
+        entry.SpawnSeconds + (SpawnY - ExitY) / FallSpeed(entry);
+
     private readonly record struct DirectionChange(
         sbyte Direction,
         float StartsAtSeconds);
@@ -72,6 +88,10 @@ public sealed class PlateStackerRound : MiniGameRoundBase
 
     public IReadOnlyList<PlateStackerScheduleEntry> Schedule => schedule;
 
+    protected override float SpeedBonusDurationSeconds => schedule.Count == 0
+        ? DurationSeconds
+        : Math.Min(DurationSeconds, schedule.Max(ExitSeconds));
+
     public override void RegisterPlayer(PlayerSession session, DateTime nowUtc)
     {
         if (playerStates.ContainsKey(session.ClientId))
@@ -100,22 +120,9 @@ public sealed class PlateStackerRound : MiniGameRoundBase
                 continue;
 
             PlayerState state = playerStates[session.ClientId];
-            foreach (PlateStackerScheduleEntry entry in state.EligiblePlates)
-            {
-                if (!state.EvaluatedPlateIds.Contains(entry.PlateId) &&
-                    elapsedSeconds >= entry.LandingSeconds + inputGraceSeconds)
-                {
-                    EvaluatePlate(
-                        session,
-                        state,
-                        entry,
-                        server);
-                    if (state.Collapsed)
-                        break;
-                }
-            }
+            ResolveThrough(session, state, Math.Max(0f, elapsedSeconds - inputGraceSeconds), server);
 
-            TryCompletePlayer(session, state, server);
+            TryCompletePlayer(session, state, elapsedSeconds, server);
         }
     }
 
@@ -192,21 +199,12 @@ public sealed class PlateStackerRound : MiniGameRoundBase
                 continue;
 
             PlayerState state = playerStates[session.ClientId];
-            foreach (PlateStackerScheduleEntry entry in state.EligiblePlates)
-            {
-                if (!state.EvaluatedPlateIds.Contains(entry.PlateId))
-                    EvaluatePlate(
-                        session,
-                        state,
-                        entry,
-                        server);
-                if (state.Collapsed)
-                    break;
-            }
+            ResolveThrough(session, state, DurationSeconds, server);
 
-            TryCompletePlayer(session, state, server);
+            TryCompletePlayer(session, state, DurationSeconds, server);
             if (!session.SubmittedThisRound)
-                session.MarkMissedRound();
+                CompleteSubmission(session, GetScore(state), server,
+                    completedAtSeconds: DurationSeconds);
         }
     }
 
@@ -230,6 +228,10 @@ public sealed class PlateStackerRound : MiniGameRoundBase
             settings.PlateWidthNormalized,
             0.01f,
             0.49f));
+        message.AddFloat(Math.Clamp(
+            settings.StartingPlateWidthNormalized,
+            0.01f,
+            0.49f));
         message.AddFloat(Math.Max(
             0.01f,
             settings.CollapseOffsetPlateWidths));
@@ -245,21 +247,59 @@ public sealed class PlateStackerRound : MiniGameRoundBase
         }
     }
 
+    private void ResolveThrough(
+        PlayerSession session, PlayerState state, float throughSeconds, Riptide.Server server)
+    {
+        while (!state.Collapsed)
+        {
+            PlateStackerScheduleEntry? next = null;
+            float nextTime = float.PositiveInfinity;
+            bool contact = false;
+            foreach (PlateStackerScheduleEntry entry in state.EligiblePlates)
+            {
+                if (state.EvaluatedPlateIds.Contains(entry.PlateId))
+                    continue;
+                float contactTime = ContactSeconds(entry, state.SuccessfulPlateCount);
+                // A plate already below a newly raised surface cannot teleport up to it.
+                bool canContact = contactTime >= state.SimulatedAtSeconds;
+                float eventTime = canContact ? contactTime : ExitSeconds(entry);
+                if (eventTime < nextTime)
+                {
+                    next = entry;
+                    nextTime = eventTime;
+                    contact = canContact;
+                }
+            }
+            if (!next.HasValue || nextTime > throughSeconds)
+                break;
+            EvaluatePlate(session, state, next.Value, nextTime, contact, server);
+        }
+    }
+
     private void EvaluatePlate(
         PlayerSession session,
         PlayerState state,
         PlateStackerScheduleEntry entry,
+        float contactSeconds,
+        bool canContact,
         Riptide.Server server)
     {
-        AdvanceTo(state, entry.LandingSeconds);
+        AdvanceTo(state, contactSeconds);
         float topXNormalized =
             state.BaseXNormalized + state.PlateOffsets[^1];
         float plateWidthNormalized = Math.Clamp(
             settings.PlateWidthNormalized,
             0.01f,
             0.49f);
-        bool landed = HasVisibleOverlap(
+        float topWidthNormalized = state.PlateOffsets.Count == 1
+            ? Math.Clamp(
+                settings.StartingPlateWidthNormalized,
+                0.01f,
+                0.49f)
+            : plateWidthNormalized;
+        bool landed = canContact && HasVisibleOverlap(
             topXNormalized,
+            topWidthNormalized,
             entry.XNormalized,
             plateWidthNormalized);
         float retainedOffsetNormalized = 0f;
@@ -279,7 +319,8 @@ public sealed class PlateStackerRound : MiniGameRoundBase
         // Keep the simulation cursor at this landing. Advancing it to the
         // current server tick would make a delayed batch evaluate subsequent
         // plates at the wrong, later position.
-        state.LastLandingSeconds = entry.LandingSeconds;
+        state.LastLandingSeconds = Math.Max(state.LastLandingSeconds,
+            landed ? contactSeconds : ExitSeconds(entry));
         state.EvaluatedPlateIds.Add(entry.PlateId);
         int score = state.Collapsed ? 0 : GetScore(state);
         SendOutcome(
@@ -300,18 +341,20 @@ public sealed class PlateStackerRound : MiniGameRoundBase
                 session,
                 0,
                 server,
-                completedAtSeconds: entry.LandingSeconds);
+                completedAtSeconds: contactSeconds);
         }
     }
 
     private void TryCompletePlayer(
         PlayerSession session,
         PlayerState state,
+        float elapsedSeconds,
         Riptide.Server server)
     {
         if (session.SubmittedThisRound ||
             state.Collapsed ||
-            state.EvaluatedPlateIds.Count < state.EligiblePlates.Count)
+            state.EvaluatedPlateIds.Count < state.EligiblePlates.Count ||
+            elapsedSeconds < state.LastLandingSeconds)
         {
             return;
         }
@@ -368,15 +411,30 @@ public sealed class PlateStackerRound : MiniGameRoundBase
     private (float MinimumX, float MaximumX) GetMovementBounds(
         PlayerState state)
     {
-        float halfWidth = Math.Clamp(
+        float startingHalfWidth = Math.Clamp(
+            settings.StartingPlateWidthNormalized * 0.5f,
+            0.005f,
+            0.245f);
+        float plateHalfWidth = Math.Clamp(
             settings.PlateWidthNormalized * 0.5f,
             0.005f,
             0.245f);
-        float minimumOffset = state.PlateOffsets.Min();
-        float maximumOffset = state.PlateOffsets.Max();
+        float minimumEdge = -startingHalfWidth;
+        float maximumEdge = startingHalfWidth;
+        for (int index = 1; index < state.PlateOffsets.Count; index++)
+        {
+            float offset = state.PlateOffsets[index];
+            minimumEdge = Math.Min(
+                minimumEdge,
+                offset - plateHalfWidth);
+            maximumEdge = Math.Max(
+                maximumEdge,
+                offset + plateHalfWidth);
+        }
+
         return (
-            halfWidth - minimumOffset,
-            1f - halfWidth - maximumOffset);
+            -minimumEdge,
+            1f - maximumEdge);
     }
 
     private int GetScore(PlayerState state)
@@ -417,10 +475,12 @@ public sealed class PlateStackerRound : MiniGameRoundBase
 
     public static bool HasVisibleOverlap(
         float firstCenter,
+        float firstWidth,
         float secondCenter,
-        float plateWidth)
+        float secondWidth)
     {
-        return Math.Abs(firstCenter - secondCenter) < plateWidth;
+        return Math.Abs(firstCenter - secondCenter) <
+            ((firstWidth + secondWidth) * 0.5f);
     }
 
     public static bool ExceedsCollapseThreshold(

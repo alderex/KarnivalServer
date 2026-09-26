@@ -421,6 +421,8 @@ public static class ServerConfigValidator
             "PlateStacker.StackSpeedNormalizedPerSecond");
         Range(value.PlateWidthNormalized, 0.01f, 0.49f,
             "PlateStacker.PlateWidthNormalized");
+        Range(value.StartingPlateWidthNormalized, 0.01f, 0.49f,
+            "PlateStacker.StartingPlateWidthNormalized");
         Positive(value.CollapseOffsetPlateWidths,
             "PlateStacker.CollapseOffsetPlateWidths");
         NonNegative(value.PointsPerPlate, "PlateStacker.PointsPerPlate");

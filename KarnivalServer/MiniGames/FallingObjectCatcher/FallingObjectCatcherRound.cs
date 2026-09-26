@@ -236,7 +236,9 @@ public sealed class FallingObjectCatcherRound : MiniGameRoundBase
             return;
         }
 
-        CompleteSubmission(session, GetScore(state), server);
+        // All players wait for the same catch windows; no earlier finish is possible.
+        CompleteSubmission(session, GetScore(state), server,
+            completedAtSeconds: DurationSeconds);
     }
 
     private int GetScore(PlayerState state)

@@ -1,5 +1,5 @@
 {
-  "version": 42,
+  "version": 44,
   "networkMessageIds": {
     "LoginRequest": 1,
     "LoginResult": 2,

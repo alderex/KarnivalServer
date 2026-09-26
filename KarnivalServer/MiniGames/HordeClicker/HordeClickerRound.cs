@@ -18,6 +18,7 @@ public sealed class HordeClickerRound : MiniGameRoundBase
         public HashSet<ushort> ResolvedCharacterIds { get; } = new();
         public int MaximumScore { get; }
         public int ClickedCount { get; set; }
+        public float LastResolvedSeconds { get; set; }
     }
 
     private readonly IReadOnlyList<HordeClickerScheduleEntry> schedule;
@@ -70,6 +71,11 @@ public sealed class HordeClickerRound : MiniGameRoundBase
         this.settings = settings;
     }
 
+    protected override float SpeedBonusDurationSeconds => schedule.Count == 0
+        ? DurationSeconds
+        : Math.Min(DurationSeconds,
+            schedule.Max(entry => entry.SpawnSeconds + entry.TravelDurationSeconds));
+
     public override void RegisterPlayer(PlayerSession session, DateTime nowUtc)
     {
         if (playerStates.ContainsKey(session.ClientId))
@@ -104,6 +110,8 @@ public sealed class HordeClickerRound : MiniGameRoundBase
                         entry.TravelDurationSeconds + graceSeconds)
                 {
                     state.ResolvedCharacterIds.Add(entry.CharacterId);
+                    state.LastResolvedSeconds = Math.Max(state.LastResolvedSeconds,
+                        entry.SpawnSeconds + entry.TravelDurationSeconds);
                 }
             }
 
@@ -135,6 +143,7 @@ public sealed class HordeClickerRound : MiniGameRoundBase
         {
             state.ResolvedCharacterIds.Add(characterId);
             state.ClickedCount++;
+            state.LastResolvedSeconds = Math.Max(state.LastResolvedSeconds, clickedAtSeconds);
         }
 
         SendClickOutcome(session, characterId, accepted, server);
@@ -150,7 +159,11 @@ public sealed class HordeClickerRound : MiniGameRoundBase
             RegisterPlayer(session, EndsUtc);
             PlayerState state = playerStates[session.ClientId];
             foreach (HordeClickerScheduleEntry entry in state.EligibleCharacters)
-                state.ResolvedCharacterIds.Add(entry.CharacterId);
+            {
+                if (state.ResolvedCharacterIds.Add(entry.CharacterId))
+                    state.LastResolvedSeconds = Math.Max(state.LastResolvedSeconds,
+                        Math.Min(DurationSeconds, entry.SpawnSeconds + entry.TravelDurationSeconds));
+            }
 
             TryCompletePlayer(session, state, server);
             if (!session.SubmittedThisRound)
@@ -235,7 +248,9 @@ public sealed class HordeClickerRound : MiniGameRoundBase
             session,
             state.ClickedCount * pointsPerCharacter,
             server,
-            state.MaximumScore);
+            state.MaximumScore,
+            completedAtSeconds: state.EligibleCharacters.Count == 0
+                ? DurationSeconds : state.LastResolvedSeconds);
     }
 
     private float GetElapsedSeconds(DateTime nowUtc)

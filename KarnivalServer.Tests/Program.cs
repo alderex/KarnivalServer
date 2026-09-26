@@ -45,6 +45,9 @@ string clientRoot = args.Length > 1
     ("SpotTheDifference validates selections and scores partial progress", TestSpotTheDifferenceScoring),
     ("PlateStacker catches, misses, collapse, and scoring are authoritative", TestPlateStackerScoring),
     ("PlateStacker evaluates delayed batches at each landing time", TestPlateStackerDelayedBatchEvaluation),
+    ("PlateStacker stack height controls completion and misses wait for exit", TestPlateStackerContactTiming),
+    ("Speed bonus includes the final second", TestFinalSecondBonus),
+    ("Scheduled game exhaustion awards 1x", TestScheduledGameBonusLimits),
     ("Round-result metadata survives reconnect restore", TestRoundResultRestore),
     ("StopGo input history is bounded and coalesced", TestStopGoInputBounds),
     ("CarPark never targets a center parking space", TestCarParkTargetSelection),
@@ -106,6 +109,9 @@ void TestDefaultConfiguration()
     AssertEx.Equal(3, loaded.MiniGames.SpotTheDifference.SelectedDifferenceCount);
     AssertEx.Equal(10f, loaded.MiniGames.PlateStacker.DurationSeconds);
     AssertEx.Equal(10, loaded.MiniGames.PlateStacker.PlateCount);
+    AssertEx.Equal(
+        0.15f,
+        loaded.MiniGames.PlateStacker.StartingPlateWidthNormalized);
     AssertEx.Equal(15f, loaded.MiniGames.Maze.DurationSeconds);
     AssertEx.Equal(12, loaded.MiniGames.Maze.GridSize);
     AssertEx.Equal(100, loaded.MiniGames.Maze.CorrectScore);
@@ -238,7 +244,7 @@ void TestGeneratedProtocols()
     AssertEx.True(ProtocolCodeGenerator.Matches(
         Path.Combine(clientRoot, "Assets", "Scripts", "Networking", "KarnivalProtocol.cs"),
         expected));
-    AssertEx.Equal((ushort)42, KarnivalProtocol.Version);
+    AssertEx.Equal((ushort)44, KarnivalProtocol.Version);
     AssertEx.Equal((ushort)18, (ushort)NetworkMessageId.SessionWaiting);
 }
 
@@ -1048,6 +1054,7 @@ void TestPlateStackerPayload()
         AssertEx.Equal(1.4f, message.GetFloat());
         AssertEx.Equal(0.8f, message.GetFloat());
         AssertEx.Equal(0.12f, message.GetFloat());
+        AssertEx.Equal(0.15f, message.GetFloat());
         AssertEx.Equal(1.5f, message.GetFloat());
         AssertEx.Equal(10, message.GetInt());
         int scheduleCount = message.GetUShort();
@@ -1071,8 +1078,14 @@ void TestPlateStackerPayload()
 
 void TestPlateStackerScoring()
 {
-    AssertEx.True(PlateStackerRound.HasVisibleOverlap(0f, 0.999f, 1f));
-    AssertEx.True(!PlateStackerRound.HasVisibleOverlap(0f, 1f, 1f));
+    AssertEx.True(PlateStackerRound.HasVisibleOverlap(
+        0f, 1f, 0.999f, 1f));
+    AssertEx.True(!PlateStackerRound.HasVisibleOverlap(
+        0f, 1f, 1f, 1f));
+    AssertEx.True(PlateStackerRound.HasVisibleOverlap(
+        0f, 0.15f, 0.1349f, 0.12f));
+    AssertEx.True(!PlateStackerRound.HasVisibleOverlap(
+        0f, 0.15f, 0.135f, 0.12f));
     AssertEx.True(!PlateStackerRound.ExceedsCollapseThreshold(
         1.5f, 1f, 1.5f));
     AssertEx.True(PlateStackerRound.ExceedsCollapseThreshold(
@@ -1093,9 +1106,9 @@ void TestPlateStackerScoring()
     };
     PlateStackerScheduleEntry[] successSchedule =
     {
-        new(1, 0.5f, 0.05f, 0.25f, 0.2f),
-        new(2, 0.5f, 0.55f, 0.75f, 0.2f),
-        new(3, 0.5f, 1.3f, 1.5f, 0.2f),
+        new(1, 0.63f, 0.05f, 0.25f, 0.2f),
+        new(2, 0.63f, 0.55f, 0.75f, 0.2f),
+        new(3, 0.63f, 1.3f, 1.5f, 0.2f),
     };
     PlateStackerRound success = CreatePlateStackerRound(
         1011,
@@ -1109,7 +1122,7 @@ void TestPlateStackerScoring()
         new[] { successfulPlayer },
         server);
     AssertEx.Equal(30, successfulPlayer.RoundResult.BaseScore);
-    AssertEx.Equal(30, successfulPlayer.RoundScore);
+    AssertEx.Equal(33, successfulPlayer.RoundScore);
 
     PlateStackerScheduleEntry[] missSchedule =
     {
@@ -1149,6 +1162,130 @@ void TestPlateStackerScoring()
         server);
     AssertEx.Equal(0, collapsedPlayer.RoundResult.BaseScore);
     AssertEx.Equal(0, collapsedPlayer.RoundScore);
+}
+
+
+void TestPlateStackerContactTiming()
+{
+    DateTime starts = DateTime.UtcNow;
+    Riptide.Server server = new();
+    PlateStackerSettings settings = new()
+    {
+        DurationSeconds = 2f, PlateCount = 3, InputGraceSeconds = 0f,
+        FutureInputToleranceSeconds = 10f,
+    };
+    PlateStackerScheduleEntry[] schedule =
+    {
+        new(1, 0.63f, 0.05f, 0.25f, 0.2f),
+        new(2, 0.63f, 0.55f, 0.75f, 0.2f),
+        new(3, 0.63f, 1.3f, 1.5f, 0.2f),
+    };
+    var round = CreatePlateStackerRound(2010, starts, settings, schedule);
+    PlayerSession tall = new(81, 81, "tall");
+    PlayerSession shortStack = new(82, 82, "short");
+    round.RegisterPlayer(tall, starts);
+    round.RegisterPlayer(shortStack, starts);
+    // Miss only the first plate, then return the tray to the center.
+    SendPlateStackerMovement(round, shortStack, server, -1, 0f);
+    SendPlateStackerMovement(round, shortStack, server, 1, 0.25f);
+    SendPlateStackerMovement(round, shortStack, server, 0, 0.5f);
+    var players = new[] { tall, shortStack };
+    // Final contact: tall stack 1.47672s, shorter stack 1.48836s.
+    round.Update(starts.AddSeconds(1.48f), players, server);
+    AssertEx.True(tall.SubmittedThisRound);
+    AssertEx.True(!shortStack.SubmittedThisRound);
+    round.Update(starts.AddSeconds(1.49f), players, server);
+    AssertEx.Equal(30, tall.RoundResult.BaseScore);
+    AssertEx.Equal(20, shortStack.RoundResult.BaseScore);
+    AssertEx.True(tall.RoundResult.SpeedMultiplier > shortStack.RoundResult.SpeedMultiplier);
+
+    // A late tick must produce the same result as the incremental updates.
+    var batch = CreatePlateStackerRound(2011, starts, settings, schedule);
+    PlayerSession batched = new(83, 83, "batch");
+    batch.RegisterPlayer(batched, starts);
+    batch.Update(starts.AddSeconds(2), new[] { batched }, server);
+    AssertEx.Equal(tall.RoundResult, batched.RoundResult);
+
+    var miss = CreatePlateStackerRound(2012, starts,
+        new PlateStackerSettings { DurationSeconds = 2f, PlateCount = 1, InputGraceSeconds = 0f },
+        new[] { new PlateStackerScheduleEntry(1, 0.9f, 0.05f, 0.25f, 0.2f) });
+    PlayerSession missed = new(84, 84, "miss");
+    miss.RegisterPlayer(missed, starts);
+    miss.Update(starts.AddSeconds(0.26), new[] { missed }, server);
+    AssertEx.True(!missed.SubmittedThisRound);
+    miss.Update(starts.AddSeconds(0.32), new[] { missed }, server);
+    AssertEx.True(missed.SubmittedThisRound);
+    AssertEx.Equal(0, missed.RoundResult.BaseScore);
+    AssertEx.Equal(1f, missed.RoundResult.SpeedMultiplier);
+
+    // Retain a nonzero score, miss the final plate, and consume the full
+    // playable schedule even though the round timer still has time left.
+    var finalMiss = CreatePlateStackerRound(2014, starts, settings,
+        new[] {
+            new PlateStackerScheduleEntry(1, 0.5f, 0.05f, 0.25f, 0.2f),
+            new PlateStackerScheduleEntry(2, 0.9f, 0.55f, 0.75f, 0.2f),
+        });
+    PlayerSession finalMissPlayer = new(86, 86, "final-miss");
+    finalMiss.RegisterPlayer(finalMissPlayer, starts);
+    finalMiss.Update(starts.AddSeconds(1), new[] { finalMissPlayer }, server);
+    AssertEx.Equal(10, finalMissPlayer.RoundResult.BaseScore);
+    AssertEx.Equal(10, finalMissPlayer.RoundScore);
+    AssertEx.Equal(1f, finalMissPlayer.RoundResult.SpeedMultiplier);
+}
+
+void TestFinalSecondBonus()
+{
+    DateTime starts = DateTime.UtcNow;
+    foreach (float contactTime in new[] { 9.25f, 10f })
+    {
+        var round = new TestRound(starts);
+        PlayerSession player = new(85, 85, "bonus");
+        round.Complete(player, 10, contactTime);
+        AssertEx.Equal(contactTime == 10f ? 1f : 1.15f, player.RoundResult.SpeedMultiplier);
+    }
+}
+
+void TestScheduledGameBonusLimits()
+{
+    DateTime starts = DateTime.UtcNow.AddSeconds(-0.5);
+    Riptide.Server server = new();
+    var catcher = new FallingObjectCatcherRound(2020, starts, 10f, 1f,
+        FallingObjectShape.Circle, 1, 1, 0, 1f, 1f, 1f, 1f,
+        new[] { new FallingObjectScheduleEntry(1, FallingObjectShape.Circle, 0.5f, 0f, 1f, 1f) },
+        new FallingObjectCatcherSettings { InputGraceSeconds = 0f });
+    PlayerSession catcherPlayer = new(87, 87, "catcher");
+    catcher.RegisterPlayer(catcherPlayer, starts);
+    catcher.Update(starts.AddSeconds(3), new[] { catcherPlayer }, server);
+    AssertEx.True(catcherPlayer.RoundResult.BaseScore > 0);
+    AssertEx.Equal(1f, catcherPlayer.RoundResult.SpeedMultiplier);
+
+    foreach (bool clickLast in new[] { false, true })
+    {
+        var horde = new HordeClickerRound(2021, starts, 10f, 1f,
+            1, 2, 10, 0f, 0f, 1f, 2f, 0.5f, 0.5f,
+            new[] { new HordeClickerScheduleEntry(1, 0f, 1f, 0.5f),
+                    new HordeClickerScheduleEntry(2, 0f, 2f, 0.5f) },
+            new HordeClickerSettings { InputGraceSeconds = 0.5f });
+        PlayerSession player = new(88, 88, "horde");
+        horde.RegisterPlayer(player, starts);
+        for (ushort id = 1; id <= (clickLast ? 2 : 1); id++)
+        {
+            Message message = Message.Create();
+            try
+            {
+                message.AddUShort(id);
+                message.AddFloat(0.4f);
+                horde.HandleInput(message, player, server);
+            }
+            finally { message.Release(); }
+        }
+        horde.Update(starts.AddSeconds(3), new[] { player }, server);
+        AssertEx.Equal(clickLast ? 20 : 10, player.RoundResult.BaseScore);
+        if (clickLast)
+            AssertEx.True(player.RoundResult.SpeedMultiplier > 1f);
+        else
+            AssertEx.Equal(1f, player.RoundResult.SpeedMultiplier);
+    }
 }
 
 void TestPlateStackerDelayedBatchEvaluation()
