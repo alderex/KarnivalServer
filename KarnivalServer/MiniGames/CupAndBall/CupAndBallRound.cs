@@ -71,6 +71,8 @@ public sealed class CupAndBallRound : MiniGameRoundBase
         (swaps.Count * shuffleStepSeconds);
 
     public float InputEndsAtSeconds => InputStartsAtSeconds + inputDurationSeconds;
+    protected override float PlayableStartsAtSeconds => InputStartsAtSeconds;
+    protected override float SpeedBonusDurationSeconds => InputEndsAtSeconds;
 
     public override void RegisterPlayer(PlayerSession session, DateTime nowUtc)
     {
@@ -89,7 +91,7 @@ public sealed class CupAndBallRound : MiniGameRoundBase
     {
         byte selectedSlot = message.GetByte();
         float selectedAtSeconds = message.GetFloat();
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAtSeconds = GetElapsedSeconds(nowUtc);
@@ -122,7 +124,8 @@ public sealed class CupAndBallRound : MiniGameRoundBase
         {
             RegisterPlayer(session, EndsUtc);
             if (playerStates[session.ClientId].Eligible)
-                CompleteSubmission(session, 0, server);
+                CompleteSubmission(session, 0, server, completedAtSeconds: InputEndsAtSeconds,
+                    reason: Karnival.Rules.CompletionReason.Timeout);
             else
                 session.MarkMissedRound();
         }

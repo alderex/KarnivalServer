@@ -61,7 +61,7 @@ public sealed class WheresBaldoRound : MiniGameRoundBase
     {
         byte characterId = message.GetByte();
         float clickedAtSeconds = message.GetFloat();
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAtSeconds = GetElapsedSeconds(nowUtc);
@@ -98,7 +98,8 @@ public sealed class WheresBaldoRound : MiniGameRoundBase
         Riptide.Server server)
     {
         foreach (PlayerSession session in sessions)
-            CompleteSubmission(session, 0, server);
+            CompleteSubmission(session, 0, server, completedAtSeconds: Timeline.EndsAt,
+                reason: Karnival.Rules.CompletionReason.Timeout);
     }
 
     public override string Describe()

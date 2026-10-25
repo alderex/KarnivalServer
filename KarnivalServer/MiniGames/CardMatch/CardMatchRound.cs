@@ -65,7 +65,7 @@ public sealed class CardMatchRound : MiniGameRoundBase
     {
         byte cardId = message.GetByte();
         float selectedAtSeconds = message.GetFloat();
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAtSeconds = GetElapsedSeconds(nowUtc);

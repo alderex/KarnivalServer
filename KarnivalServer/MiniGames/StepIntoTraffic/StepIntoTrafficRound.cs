@@ -62,7 +62,7 @@ public sealed class StepIntoTrafficRound : MiniGameRoundBase
         Riptide.Server server)
     {
         float hopAtSeconds = message.GetFloat();
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAt = GetElapsedSeconds(nowUtc);

@@ -59,7 +59,7 @@ public sealed class PhotoPuzzleSliderRound : MiniGameRoundBase
         if (tileId >= PhotoPuzzleBoard.SlotCount || tileId == MissingTileId)
             return;
 
-        RegisterPlayer(session, DateTime.UtcNow);
+        RegisterPlayer(session, NowUtc);
         PlayerState state = playerStates[session.ClientId];
         int tileSlot = PhotoPuzzleBoard.Find(state.Board, tileId);
         int emptySlot = PhotoPuzzleBoard.Find(state.Board, PhotoPuzzleBoard.Empty);
@@ -81,7 +81,7 @@ public sealed class PhotoPuzzleSliderRound : MiniGameRoundBase
         {
             RegisterPlayer(session, EndsUtc);
             if (!session.SubmittedThisRound)
-                CompletePlayer(session, playerStates[session.ClientId], server);
+                CompletePlayer(session, playerStates[session.ClientId], server, timedOut: true);
         }
     }
 
@@ -101,7 +101,8 @@ public sealed class PhotoPuzzleSliderRound : MiniGameRoundBase
     private void CompletePlayer(
         PlayerSession session,
         PlayerState state,
-        Riptide.Server server)
+        Riptide.Server server,
+        bool timedOut = false)
     {
         int correctTiles = PhotoPuzzleBoard.CountCorrectTiles(state.Board, MissingTileId);
         bool solved = PhotoPuzzleBoard.IsSolved(state.Board, MissingTileId);
@@ -109,7 +110,9 @@ public sealed class PhotoPuzzleSliderRound : MiniGameRoundBase
         if (solved)
             score += Math.Max(0, settings.CompletionBonus);
 
-        if (!CompleteSubmission(session, score, server))
+        if (!CompleteSubmission(session, score, server,
+            completedAtSeconds: timedOut ? Timeline.EndsAt : (float)(NowUtc - StartsUtc).TotalSeconds,
+            reason: timedOut ? Karnival.Rules.CompletionReason.Timeout : Karnival.Rules.CompletionReason.Success))
             return;
 
         RiptideConsoleLogger.Info(

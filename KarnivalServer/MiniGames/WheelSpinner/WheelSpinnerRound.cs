@@ -51,7 +51,7 @@ public sealed class WheelSpinnerRound : MiniGameRoundBase
             return;
         }
 
-        float receivedAtSeconds = GetElapsedSeconds(DateTime.UtcNow);
+        float receivedAtSeconds = GetElapsedSeconds(NowUtc);
         if (!IsValidTimestamp(stoppedAtSeconds, receivedAtSeconds))
         {
             SendOutcome(session, false, stoppedAtSeconds,

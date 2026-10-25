@@ -43,7 +43,7 @@ public sealed class PotatoFaceRound : MiniGameRoundBase
         PotatoFacePartVariant noseVariant = (PotatoFacePartVariant)message.GetByte();
         PotatoFacePosition nosePosition = new(message.GetFloat(), message.GetFloat());
         float submittedAtSeconds = message.GetFloat();
-        float receivedAtSeconds = GetElapsedSeconds(DateTime.UtcNow);
+        float receivedAtSeconds = GetElapsedSeconds(NowUtc);
         if (!IsSubmittedVariant(leftEyeVariant) ||
             !IsSubmittedVariant(rightEyeVariant) ||
             !IsSubmittedVariant(mouthVariant) ||
@@ -86,7 +86,8 @@ public sealed class PotatoFaceRound : MiniGameRoundBase
         Riptide.Server server)
     {
         foreach (PlayerSession session in sessions)
-            CompleteSubmission(session, 0, server);
+            CompleteSubmission(session, 0, server, completedAtSeconds: Timeline.EndsAt,
+                reason: Karnival.Rules.CompletionReason.Timeout);
     }
 
     public override string Describe()

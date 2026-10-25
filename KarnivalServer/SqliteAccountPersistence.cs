@@ -11,7 +11,10 @@ public sealed class SqliteAccountPersistence
         InitializeSchema();
     }
 
-    public AccountLoginRecord? TryGetOrCreateLogin(string username, string loginHash)
+    public AccountLoginRecord? TryGetOrCreateLogin(string username, string loginHash) =>
+        ServerPerformance.MeasureDatabase("login", () => GetOrCreateLogin(username, loginHash));
+
+    private AccountLoginRecord? GetOrCreateLogin(string username, string loginHash)
     {
         using SqliteConnection connection = OpenConnection();
         using SqliteTransaction transaction = connection.BeginTransaction();
@@ -53,7 +56,10 @@ public sealed class SqliteAccountPersistence
         return new AccountLoginRecord(userId, username, loginHash, 0);
     }
 
-    public void IncrementWins(IEnumerable<long> userIds)
+    public void IncrementWins(IEnumerable<long> userIds) =>
+        ServerPerformance.MeasureDatabase("increment wins", () => { IncrementWinsCore(userIds); return true; });
+
+    private void IncrementWinsCore(IEnumerable<long> userIds)
     {
         long[] distinctUserIds = userIds.Distinct().ToArray();
         if (distinctUserIds.Length == 0)

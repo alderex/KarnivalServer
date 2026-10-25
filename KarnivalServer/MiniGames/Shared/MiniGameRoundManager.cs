@@ -1,4 +1,5 @@
 using Riptide;
+using BettingEntry = SessionBettingLedger.Entry;
 
 public enum SessionLifecyclePhase
 {
@@ -33,26 +34,6 @@ public sealed class MiniGameRoundManager
         public PlayerRoundResult RoundResult { get; set; } = PlayerRoundResult.Pending;
     }
 
-    private sealed class BettingEntry
-    {
-        public BettingEntry(PlayerSession session)
-        {
-            UserId = session.UserId;
-            ClientId = session.ClientId;
-            Username = session.Username;
-            IsSimulated = session.IsSimulated;
-            AvailableScore = session.TotalScore;
-        }
-
-        public long UserId { get; }
-        public ushort ClientId { get; set; }
-        public string Username { get; }
-        public bool IsSimulated { get; }
-        public int AvailableScore { get; }
-        public int Wager { get; set; }
-        public bool Locked { get; set; }
-    }
-
     private readonly record struct LeaderboardEntry(
         ushort ClientId,
         string Username,
@@ -60,6 +41,7 @@ public sealed class MiniGameRoundManager
         int TotalScore,
         int BetLoss);
 
+    private readonly IGameplayClock clock;
     private readonly ServerConfig config;
     private readonly Random random;
     private readonly IDictionary<ushort, PlayerSession> sessions;
@@ -72,7 +54,7 @@ public sealed class MiniGameRoundManager
     private readonly HashSet<ushort> readyClientIds = new();
     private readonly HashSet<long> waitingUserIds = new();
     private readonly Dictionary<MiniGameType, int> sessionGamePlayCounts = new();
-    private readonly Dictionary<long, BettingEntry> bettingEntries = new();
+    private readonly SessionBettingLedger bettingEntries;
     private readonly Dictionary<long, int> roundBetLosses = new();
     private PlayerSession[] cachedLobbyRoster = Array.Empty<PlayerSession>();
     private LeaderboardEntry[] cachedRoundResults = Array.Empty<LeaderboardEntry>();
@@ -93,9 +75,12 @@ public sealed class MiniGameRoundManager
         IDictionary<ushort, PlayerSession> sessions,
         Riptide.Server server,
         MiniGameCatalog catalog,
-        SqliteAccountPersistence persistence)
+        SqliteAccountPersistence persistence,
+        IGameplayClock? clock = null)
     {
+        this.clock = clock ?? MonotonicGameplayClock.Instance;
         this.config = config;
+        bettingEntries = new SessionBettingLedger(config.Betting.MaximumWager);
         this.random = random;
         this.sessions = sessions;
         this.server = server;
@@ -119,7 +104,7 @@ public sealed class MiniGameRoundManager
 
     public void Update(DateTime nowUtc)
     {
-        if (ConnectedHumans().Count == 0)
+        if (!HasConnectedHuman())
         {
             if (Phase != SessionLifecyclePhase.Idle)
                 AbortSession();
@@ -210,7 +195,7 @@ public sealed class MiniGameRoundManager
             CurrentRound != null &&
             !IsWaiting(session))
         {
-            CurrentRound.UnregisterPlayer(session, DateTime.UtcNow, server);
+            CurrentRound.UnregisterPlayer(session, clock.UtcNow, server);
         }
 
         if (participants.TryGetValue(session.UserId, out SessionParticipant? participant))
@@ -221,7 +206,7 @@ public sealed class MiniGameRoundManager
 
         lobbyRosterDirty = true;
 
-        if (ConnectedHumans().Count == 0)
+        if (!HasConnectedHuman())
         {
             AbortSession();
             return;
@@ -244,20 +229,13 @@ public sealed class MiniGameRoundManager
                 sessionId != SessionId ||
                 !sessions.TryGetValue(clientId, out PlayerSession? bettingSession) ||
                 bettingSession.IsSimulated ||
-                !bettingEntries.TryGetValue(bettingSession.UserId, out BettingEntry? entry) ||
-                entry.Locked ||
-                wager < 0 ||
-                wager > GetMaximumWager(entry) ||
-                !bettingSession.TrySpendSessionScore(wager))
+                !bettingEntries.TryLock(bettingSession, wager, out BettingEntry? entry))
                 return true;
 
-            entry.Wager = wager;
-            entry.Locked = true;
-            entry.ClientId = bettingSession.ClientId;
             SyncParticipantScore(bettingSession);
-            BroadcastBettingUpdate(entry, bettingSession.TotalScore);
+            BroadcastBettingUpdate(entry!, bettingSession.TotalScore);
             if (AllConnectedHumansLocked())
-                StartNextRound(DateTime.UtcNow);
+                StartNextRound(clock.UtcNow);
             return true;
         }
 
@@ -286,7 +264,7 @@ public sealed class MiniGameRoundManager
             CurrentRound == null ||
             CurrentRound.Phase != RoundPhase.Active ||
             !CurrentRound.IsStartScheduled ||
-            DateTime.UtcNow < CurrentRound.StartsUtc ||
+            clock.UtcNow < CurrentRound.StartsUtc ||
             CurrentRound.RoundId != roundId ||
             CurrentRound.GameType != gameType ||
             !sessions.TryGetValue(clientId, out PlayerSession? session) ||
@@ -397,7 +375,7 @@ public sealed class MiniGameRoundManager
 
     public bool TryStartSessionNow(DateTime nowUtc, out string status)
     {
-        if (ConnectedHumans().Count == 0)
+        if (!HasConnectedHuman())
         {
             status = "Cannot start a session without a connected human player.";
             return false;
@@ -419,7 +397,7 @@ public sealed class MiniGameRoundManager
 
     public bool TrySkipToFinalRound(DateTime nowUtc, out string status)
     {
-        if (ConnectedHumans().Count == 0)
+        if (!HasConnectedHuman())
         {
             status = "Cannot skip to the final round without a connected human player.";
             return false;
@@ -569,6 +547,7 @@ public sealed class MiniGameRoundManager
             Math.Max(0.1f, config.RoundDurationSeconds),
             resultsDuration,
             random));
+        CurrentRound.Clock = clock;
         CurrentRound.ConfigureSession(SessionId, sessionRoundNumber, TotalRounds);
 
         foreach (PlayerSession session in sessions.Values)
@@ -677,87 +656,17 @@ public sealed class MiniGameRoundManager
         BroadcastBettingState(nowUtc);
     }
 
-    private void CreateBettingEntries()
-    {
-        foreach (PlayerSession session in sessions.Values)
-        {
-            BettingEntry entry = new(session);
-            bettingEntries[session.UserId] = entry;
-            if (!session.IsSimulated)
-                continue;
-
-            int maximumWager = GetMaximumWager(entry);
-            int wager = maximumWager <= 0
-                ? 0
-                : (int)random.NextInt64((long)maximumWager + 1);
-            session.TrySpendSessionScore(wager);
-            entry.Wager = wager;
-            entry.Locked = true;
-        }
-    }
-
-    private void EnsureBettingEntry(PlayerSession session)
-    {
-        if (bettingEntries.TryGetValue(session.UserId, out BettingEntry? existing))
-        {
-            existing.ClientId = session.ClientId;
-            return;
-        }
-
-        bettingEntries[session.UserId] = new BettingEntry(session);
-    }
-
-    private int GetMaximumWager(BettingEntry entry)
-    {
-        return Math.Min(
-            entry.AvailableScore,
-            Math.Max(0, config.Betting.MaximumWager));
-    }
-
-    private bool AllConnectedHumansLocked()
-    {
-        PlayerSession[] humans = ConnectedHumans().ToArray();
-        return humans.Length > 0 &&
-            humans.All(session =>
-                bettingEntries.TryGetValue(session.UserId, out BettingEntry? entry) &&
-                entry.Locked);
-    }
+    private void CreateBettingEntries() => bettingEntries.Initialize(sessions.Values, random);
+    private void EnsureBettingEntry(PlayerSession session) => bettingEntries.Ensure(session);
+    private int GetMaximumWager(BettingEntry entry) => bettingEntries.MaximumWager(entry);
+    private bool AllConnectedHumansLocked() => bettingEntries.AllHumansLocked(sessions.Values);
 
     private void ResolveBets()
     {
-        int highestScore = sessions.Values
-            .Select(session => session.RoundScore)
+        int highestScore = sessions.Values.Select(session => session.RoundScore)
             .Concat(participants.Values.Select(participant => participant.RoundResult.Score))
-            .DefaultIfEmpty(0)
-            .Max();
-
-        if (highestScore > 0)
-        {
-            foreach (BettingEntry entry in bettingEntries.Values)
-            {
-                if (entry.Wager <= 0)
-                    continue;
-
-                if (GetRoundScore(entry.UserId) != highestScore)
-                {
-                    roundBetLosses[entry.UserId] = -entry.Wager;
-                    continue;
-                }
-
-                int payout = (int)Math.Min(int.MaxValue, (long)entry.Wager * 2);
-                AddScore(entry.UserId, payout);
-            }
-        }
-        else
-        {
-            foreach (BettingEntry entry in bettingEntries.Values)
-            {
-                if (entry.Wager > 0)
-                    roundBetLosses[entry.UserId] = -entry.Wager;
-            }
-        }
-
-        bettingEntries.Clear();
+            .DefaultIfEmpty(0).Max();
+        bettingEntries.Resolve(highestScore, GetRoundScore, AddScore, roundBetLosses);
         bettingTargetRoundNumber = 0;
     }
 
@@ -788,9 +697,7 @@ public sealed class MiniGameRoundManager
 
     private void RefundAndClearBets()
     {
-        foreach (BettingEntry entry in bettingEntries.Values)
-            AddScore(entry.UserId, entry.Wager);
-        bettingEntries.Clear();
+        bettingEntries.Refund(AddScore);
         bettingTargetRoundNumber = 0;
     }
 
@@ -1087,10 +994,15 @@ public sealed class MiniGameRoundManager
         }
     }
 
-    private List<PlayerSession> ConnectedHumans()
+    private bool HasConnectedHuman()
     {
-        return sessions.Values.Where(session => !session.IsSimulated).ToList();
+        foreach (PlayerSession session in sessions.Values)
+            if (!session.IsSimulated) return true;
+        return false;
     }
+
+    private IEnumerable<PlayerSession> ConnectedHumans() =>
+        sessions.Values.Where(session => !session.IsSimulated);
 
     private IEnumerable<PlayerSession> ParticipatingHumans()
     {

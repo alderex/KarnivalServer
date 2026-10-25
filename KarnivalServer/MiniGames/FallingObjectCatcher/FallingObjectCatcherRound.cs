@@ -115,7 +115,7 @@ public sealed class FallingObjectCatcherRound : MiniGameRoundBase
         if (direction < -1 || direction > 1 || float.IsNaN(startsAtSeconds))
             return;
 
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAtSeconds = GetElapsedSeconds(nowUtc);

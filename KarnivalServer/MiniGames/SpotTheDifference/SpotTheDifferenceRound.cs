@@ -61,7 +61,7 @@ public sealed class SpotTheDifferenceRound : MiniGameRoundBase
     {
         byte differenceId = message.GetByte();
         float clickedAtSeconds = message.GetFloat();
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAtSeconds = GetElapsedSeconds(nowUtc);
@@ -100,7 +100,8 @@ public sealed class SpotTheDifferenceRound : MiniGameRoundBase
             CompleteSubmission(
                 session,
                 state.SelectedDifferenceIds.Count * pointsPerDifference,
-                server);
+                server, completedAtSeconds: Timeline.EndsAt,
+                reason: Karnival.Rules.CompletionReason.Timeout);
         }
     }
 

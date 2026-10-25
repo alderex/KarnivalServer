@@ -140,7 +140,7 @@ public sealed class StopGoRound : MiniGameRoundBase
     {
         bool isRunning = message.GetBool();
         float sampledAt = message.GetFloat();
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         if (!playerStates.TryGetValue(session.ClientId, out PlayerState? state) ||
             state.Status != StopGoRacerStatus.Racing)

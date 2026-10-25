@@ -62,6 +62,8 @@ public sealed class CarParkRound : MiniGameRoundBase
     }
 
     public float DrivingEndsAtSeconds => leadInSeconds + drivingDurationSeconds;
+    protected override float PlayableStartsAtSeconds => leadInSeconds;
+    protected override float SpeedBonusDurationSeconds => DrivingEndsAtSeconds;
 
     public override void RegisterPlayer(PlayerSession session, DateTime nowUtc)
     {
@@ -109,7 +111,7 @@ public sealed class CarParkRound : MiniGameRoundBase
     {
         float steering = message.GetFloat();
         float sampledAt = message.GetFloat();
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAt = GetElapsedSeconds(nowUtc);
@@ -362,7 +364,12 @@ public sealed class CarParkRound : MiniGameRoundBase
                 ? Math.Max(0, settings.CorrectScore)
                 : 0,
             server,
-            completedAtSeconds: state.SimulatedAtSeconds);
+            completedAtSeconds: state.SimulatedAtSeconds,
+            reason: reason == CarParkOutcomeReason.Timeout
+                ? Karnival.Rules.CompletionReason.Timeout
+                : reason == CarParkOutcomeReason.Parked
+                    ? Karnival.Rules.CompletionReason.Success
+                    : Karnival.Rules.CompletionReason.Failure);
     }
 
     private float GetElapsedSeconds(DateTime nowUtc)

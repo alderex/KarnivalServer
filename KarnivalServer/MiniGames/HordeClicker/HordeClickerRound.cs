@@ -126,7 +126,7 @@ public sealed class HordeClickerRound : MiniGameRoundBase
     {
         ushort characterId = message.GetUShort();
         float clickedAtSeconds = message.GetFloat();
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAtSeconds = GetElapsedSeconds(nowUtc);

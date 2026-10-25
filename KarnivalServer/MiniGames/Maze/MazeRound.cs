@@ -92,7 +92,7 @@ public sealed class MazeRound : MiniGameRoundBase
                 message.GetFloat());
         }
 
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         if (session.SubmittedThisRound || state.Completed)

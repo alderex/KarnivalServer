@@ -8,6 +8,7 @@ public sealed class Server
     private const int MaximumUsernameLength = 32;
     private const int Sha256HexLength = 64;
 
+    private readonly IGameplayClock clock = MonotonicGameplayClock.Instance;
     private readonly ServerConfig config;
     private readonly SqliteAccountPersistence persistence;
     private readonly Dictionary<ushort, PlayerSession> sessions = new();
@@ -35,7 +36,8 @@ public sealed class Server
             sessions,
             server,
             MiniGameCatalog.CreateDefault(config),
-            persistence);
+            persistence,
+            clock);
         chatService = new ChatService(
             sessions,
             server,
@@ -68,10 +70,10 @@ public sealed class Server
 
     private void RunTick()
     {
-        DateTime tickStartedAt = DateTime.UtcNow;
+        long tickStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         server.Update();
         ProcessConsoleCommands();
-        miniGameRoundManager.Update(DateTime.UtcNow);
+        miniGameRoundManager.Update(clock.UtcNow);
         SleepUntilNextTick(tickStartedAt);
     }
 
@@ -151,7 +153,7 @@ public sealed class Server
             return;
         }
 
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = clock.UtcNow;
         bool succeeded;
         string status;
         switch (args[1].ToLowerInvariant())
@@ -354,7 +356,7 @@ public sealed class Server
         if (sessions.ContainsKey(clientId))
         {
             SendLoginResult(clientId, true, "Already logged in.");
-            miniGameRoundManager.SendCurrentPhase(clientId, DateTime.UtcNow);
+            miniGameRoundManager.SendCurrentPhase(clientId, clock.UtcNow);
             return;
         }
 
@@ -375,7 +377,7 @@ public sealed class Server
 
             sessions[clientId] = new PlayerSession(clientId, login.UserId, login.Username, login.Wins);
             SendLoginResult(clientId, true, "Login successful.");
-            miniGameRoundManager.OnHumanLoggedIn(sessions[clientId], DateTime.UtcNow);
+            miniGameRoundManager.OnHumanLoggedIn(sessions[clientId], clock.UtcNow);
             RiptideConsoleLogger.Info($"Client {clientId} logged in as '{login.Username}' (user {login.UserId}).");
         }
         catch (Exception ex)
@@ -394,9 +396,10 @@ public sealed class Server
         server.Send(response, clientId);
     }
 
-    private void SleepUntilNextTick(DateTime tickStartedAt)
+    private void SleepUntilNextTick(long tickStartedAt)
     {
-        TimeSpan elapsed = DateTime.UtcNow - tickStartedAt;
+        TimeSpan elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(tickStartedAt);
+        ServerPerformance.RecordTick(elapsed, config.TickInterval);
         TimeSpan remaining = config.TickInterval - elapsed;
         if (remaining > TimeSpan.Zero)
             Thread.Sleep(remaining);

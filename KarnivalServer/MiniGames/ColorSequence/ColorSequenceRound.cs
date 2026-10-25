@@ -59,6 +59,9 @@ public sealed class ColorSequenceRound : MiniGameRoundBase
     public float InputStartsAtSeconds => playbackLeadInSeconds +
         (sequence.Count * (playbackLitSeconds + playbackGapSeconds));
 
+    protected override float PlayableStartsAtSeconds => InputStartsAtSeconds;
+    protected override float SpeedBonusDurationSeconds => InputStartsAtSeconds + inputDurationSeconds;
+
     public override DateTime SubmissionDeadlineUtc => EndsUtc.AddSeconds(
         Math.Max(0f, settings.InputGraceSeconds));
 
@@ -87,7 +90,7 @@ public sealed class ColorSequenceRound : MiniGameRoundBase
         }
 
         float submittedAtSeconds = message.GetFloat();
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAtSeconds = GetElapsedSeconds(nowUtc);
@@ -125,7 +128,8 @@ public sealed class ColorSequenceRound : MiniGameRoundBase
         {
             RegisterPlayer(session, EndsUtc);
             if (playerStates[session.ClientId].Eligible)
-                CompleteSubmission(session, 0, server);
+                CompleteSubmission(session, 0, server, completedAtSeconds: Timeline.EndsAt,
+                    reason: Karnival.Rules.CompletionReason.Timeout);
             else
                 session.MarkMissedRound();
         }

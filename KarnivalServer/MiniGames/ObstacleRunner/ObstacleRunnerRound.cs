@@ -91,7 +91,7 @@ public sealed class ObstacleRunnerRound : MiniGameRoundBase
         if (action is not RunnerAction.Jumping and not RunnerAction.Sliding)
             return;
 
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAtSeconds = GetElapsedSeconds(nowUtc);

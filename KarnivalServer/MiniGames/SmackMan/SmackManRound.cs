@@ -73,7 +73,7 @@ public sealed class SmackManRound : MiniGameRoundBase
 
         float elapsedSeconds = GetElapsedSeconds(nowUtc);
         SmackManScheduleEntry[] eligibleAppearances = schedule
-            .Where(entry => entry.SpawnSeconds + activeDurationSeconds > elapsedSeconds)
+            .Where(entry => entry.SpawnSeconds + riseDurationSeconds + holdDurationSeconds > elapsedSeconds)
             .ToArray();
         playerStates.Add(
             session.ClientId,
@@ -97,7 +97,7 @@ public sealed class SmackManRound : MiniGameRoundBase
             {
                 if (!state.ResolvedAppearanceIds.Contains(entry.AppearanceId) &&
                     elapsedSeconds >= entry.SpawnSeconds +
-                        activeDurationSeconds + graceSeconds)
+                        riseDurationSeconds + holdDurationSeconds + graceSeconds)
                 {
                     state.ResolvedAppearanceIds.Add(entry.AppearanceId);
                 }
@@ -114,7 +114,7 @@ public sealed class SmackManRound : MiniGameRoundBase
     {
         ushort appearanceId = message.GetUShort();
         float clickedAtSeconds = message.GetFloat();
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAtSeconds = GetElapsedSeconds(nowUtc);
@@ -125,7 +125,8 @@ public sealed class SmackManRound : MiniGameRoundBase
         bool accepted = matchingEntry.HasValue &&
             !state.ResolvedAppearanceIds.Contains(appearanceId) &&
             IsValidTimestamp(clickedAtSeconds, receivedAtSeconds) &&
-            IsVisible(matchingEntry.Value, clickedAtSeconds, activeDurationSeconds);
+            Karnival.Rules.SmackManRules.IsClickable(clickedAtSeconds,
+                matchingEntry.Value.SpawnSeconds, riseDurationSeconds, holdDurationSeconds);
 
         if (accepted)
         {

@@ -1,24 +1,24 @@
 using Riptide;
+using Karnival.Rules;
 
 public sealed class PlateStackerRound : MiniGameRoundBase
 {
     private const byte PlateOutcomeEvent = 1;
 
     // Presentation-space geometry, validated against the Unity scene.
-    public const float SpawnY = 248f;
-    public const float FirstContactY = -130f;
-    public const float StackSpacing = 22f;
-    public const float ExitY = -247f;
+    public const float SpawnY = PlateStackerRules.SpawnY;
+    public const float FirstContactY = PlateStackerRules.FirstContactY;
+    public const float StackSpacing = PlateStackerRules.StackSpacing;
+    public const float ExitY = PlateStackerRules.ExitY;
 
     public static float FallSpeed(PlateStackerScheduleEntry entry) =>
-        (SpawnY - FirstContactY) / Math.Max(0.1f, entry.FallDurationSeconds);
+        PlateStackerRules.FallSpeed(entry.FallDurationSeconds);
 
     public static float ContactSeconds(PlateStackerScheduleEntry entry, int caughtCount) =>
-        entry.SpawnSeconds +
-        (SpawnY - FirstContactY - caughtCount * StackSpacing) / FallSpeed(entry);
+        PlateStackerRules.ContactSeconds(entry.SpawnSeconds, entry.FallDurationSeconds, caughtCount);
 
     public static float ExitSeconds(PlateStackerScheduleEntry entry) =>
-        entry.SpawnSeconds + (SpawnY - ExitY) / FallSpeed(entry);
+        PlateStackerRules.ExitSeconds(entry.SpawnSeconds, entry.FallDurationSeconds);
 
     private readonly record struct DirectionChange(
         sbyte Direction,
@@ -140,7 +140,7 @@ public sealed class PlateStackerRound : MiniGameRoundBase
             return;
         }
 
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         if (session.SubmittedThisRound || state.Collapsed)
@@ -215,36 +215,32 @@ public sealed class PlateStackerRound : MiniGameRoundBase
 
     protected override void WriteStartedPayload(Message message)
     {
-        message.AddUInt(scheduleSeed);
-        message.AddUShort((ushort)schedule.Count);
-        message.AddFloat(firstLandingSeconds);
-        message.AddFloat(lastLandingSeconds);
-        message.AddFloat(minimumFallDurationSeconds);
-        message.AddFloat(maximumFallDurationSeconds);
-        message.AddFloat(Math.Max(
-            0.01f,
-            settings.StackSpeedNormalizedPerSecond));
-        message.AddFloat(Math.Clamp(
-            settings.PlateWidthNormalized,
-            0.01f,
-            0.49f));
-        message.AddFloat(Math.Clamp(
-            settings.StartingPlateWidthNormalized,
-            0.01f,
-            0.49f));
-        message.AddFloat(Math.Max(
-            0.01f,
-            settings.CollapseOffsetPlateWidths));
-        message.AddInt(Math.Max(0, settings.PointsPerPlate));
-        message.AddUShort((ushort)schedule.Count);
-        foreach (PlateStackerScheduleEntry entry in schedule)
+        var packet = new Karnival.Protocol.PlateStackerPacket
         {
-            message.AddUShort(entry.PlateId);
-            message.AddFloat(entry.XNormalized);
-            message.AddFloat(entry.SpawnSeconds);
-            message.AddFloat(entry.LandingSeconds);
-            message.AddFloat(entry.FallDurationSeconds);
+            ScheduleSeed = scheduleSeed,
+            PlateCount = (ushort)schedule.Count,
+            FirstLandingSeconds = firstLandingSeconds,
+            LastLandingSeconds = lastLandingSeconds,
+            MinimumFallDurationSeconds = minimumFallDurationSeconds,
+            MaximumFallDurationSeconds = maximumFallDurationSeconds,
+            StackSpeedNormalizedPerSecond = Math.Max(0.01f, settings.StackSpeedNormalizedPerSecond),
+            PlateWidthNormalized = Math.Clamp(settings.PlateWidthNormalized, 0.01f, 0.49f),
+            StartingPlateWidthNormalized = Math.Clamp(settings.StartingPlateWidthNormalized, 0.01f, 0.49f),
+            CollapseOffsetPlateWidths = Math.Max(0.01f, settings.CollapseOffsetPlateWidths),
+            PointsPerPlate = Math.Max(0, settings.PointsPerPlate),
+            Schedule = new Karnival.Protocol.PlateSchedulePacket[schedule.Count],
+        };
+        for (int index = 0; index < schedule.Count; index++)
+        {
+            PlateStackerScheduleEntry entry = schedule[index];
+            packet.Schedule[index] = new Karnival.Protocol.PlateSchedulePacket
+            {
+                PlateId = entry.PlateId, XNormalized = entry.XNormalized,
+                SpawnSeconds = entry.SpawnSeconds, LandingSeconds = entry.LandingSeconds,
+                FallDurationSeconds = entry.FallDurationSeconds,
+            };
         }
+        packet.Write(message);
     }
 
     private void ResolveThrough(

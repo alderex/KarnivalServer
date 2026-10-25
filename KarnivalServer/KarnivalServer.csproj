@@ -7,6 +7,17 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <!-- Override for CI checkouts that do not use the local sibling-project layout. -->
+    <KarnivalRulesRoot Condition="'$(KarnivalRulesRoot)' == ''">$(MSBuildThisFileDirectory)..\..\..\Unity Projects\KarnivalClient\Assets\Scripts\SharedRules</KarnivalRulesRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(KarnivalRulesRoot)\**\*.cs" Link="SharedRules\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+  <Target Name="RequireSharedRules" BeforeTargets="CoreCompile">
+    <Error Condition="!Exists('$(KarnivalRulesRoot)\PlayableTimeline.cs')" Text="Set KarnivalRulesRoot to the client Assets/Scripts/SharedRules directory." />
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
     <ProjectReference Include="..\RiptideNetworking\RiptideNetworking.csproj" AdditionalProperties="GeneratePackageOnBuild=false" />

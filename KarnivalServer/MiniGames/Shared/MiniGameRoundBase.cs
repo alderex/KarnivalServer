@@ -1,8 +1,10 @@
 using Riptide;
+using Karnival.Rules;
 
 public abstract class MiniGameRoundBase
 {
-    private const float MaximumEarlyFinishMultiplier = 3f;
+    public IGameplayClock Clock { get; set; } = MonotonicGameplayClock.Instance;
+    protected DateTime NowUtc => Clock.UtcNow;
 
     protected MiniGameRoundBase(
         uint roundId,
@@ -35,6 +37,9 @@ public abstract class MiniGameRoundBase
 
     // Scheduled games may exhaust all opportunities before the round timer.
     protected virtual float SpeedBonusDurationSeconds => DurationSeconds;
+    protected virtual float PlayableStartsAtSeconds => 0f;
+    public PlayableTimeline Timeline => new(PlayableStartsAtSeconds,
+        Math.Clamp(SpeedBonusDurationSeconds, 0f, DurationSeconds));
     public RoundPhase Phase { get; private set; }
     public DateTime EndsUtc => StartsUtc.AddSeconds(DurationSeconds);
     public virtual DateTime SubmissionDeadlineUtc => EndsUtc;
@@ -47,19 +52,20 @@ public abstract class MiniGameRoundBase
         Message message = Message.Create(
             MessageSendMode.Reliable,
             NetworkMessageId.MiniGameStarted);
-        message.AddUInt(RoundId);
-        message.AddUInt(SessionId);
-        message.AddUShort(SessionRoundNumber);
-        message.AddUShort(TotalRounds);
-        message.AddUShort((ushort)GameType);
-        message.AddLong(IsStartScheduled
-            ? new DateTimeOffset(StartsUtc).ToUnixTimeMilliseconds()
-            : 0L);
-        message.AddFloat(DurationSeconds);
-        message.AddFloat(ResultsDurationSeconds);
-        message.AddFloat(IsStartScheduled
-            ? Math.Min((float)(DateTime.UtcNow - StartsUtc).TotalSeconds, DurationSeconds)
-            : 0f);
+        new Karnival.Protocol.RoundStartedPacket
+        {
+            RoundId = RoundId,
+            SessionId = SessionId,
+            RoundNumber = SessionRoundNumber,
+            TotalRounds = TotalRounds,
+            GameType = (ushort)GameType,
+            StartUnixMs = IsStartScheduled ? new DateTimeOffset(StartsUtc).ToUnixTimeMilliseconds() : 0L,
+            DurationSeconds = DurationSeconds,
+            ResultsDurationSeconds = ResultsDurationSeconds,
+            ElapsedSeconds = IsStartScheduled ? Math.Min((float)(NowUtc - StartsUtc).TotalSeconds, DurationSeconds) : 0f,
+            PlayableStartsAt = Timeline.StartsAt,
+            PlayableEndsAt = Timeline.EndsAt,
+        }.Write(message);
         WriteStartedPayload(message);
         return message;
     }
@@ -73,7 +79,7 @@ public abstract class MiniGameRoundBase
         message.AddUShort((ushort)GameType);
         message.AddLong(new DateTimeOffset(StartsUtc).ToUnixTimeMilliseconds());
         message.AddFloat(Math.Min(
-            (float)(DateTime.UtcNow - StartsUtc).TotalSeconds,
+            (float)(NowUtc - StartsUtc).TotalSeconds,
             DurationSeconds));
         return message;
     }
@@ -129,7 +135,8 @@ public abstract class MiniGameRoundBase
         Riptide.Server server)
     {
         foreach (PlayerSession session in sessions)
-            CompleteSubmission(session, 0, server);
+            CompleteSubmission(session, 0, server, completedAtSeconds: DurationSeconds,
+                reason: CompletionReason.Timeout);
     }
 
     public abstract string Describe();
@@ -141,7 +148,8 @@ public abstract class MiniGameRoundBase
         int score,
         Riptide.Server server,
         int? maximumScore = null,
-        float? completedAtSeconds = null)
+        float? completedAtSeconds = null,
+        CompletionReason reason = CompletionReason.Success)
     {
         if (Phase != RoundPhase.Active || session.SubmittedThisRound)
             return false;
@@ -149,10 +157,10 @@ public abstract class MiniGameRoundBase
         int applicableMaximumScore = Math.Max(0, maximumScore ?? MaximumScore);
         int normalizedScore = Math.Clamp(score, 0, applicableMaximumScore);
         float completionElapsed = Math.Clamp(
-            completedAtSeconds ?? (float)(DateTime.UtcNow - StartsUtc).TotalSeconds,
+            completedAtSeconds ?? (float)(NowUtc - StartsUtc).TotalSeconds,
             0f,
             DurationSeconds);
-        float speedMultiplier = GetSpeedMultiplier(completionElapsed);
+        float speedMultiplier = Timeline.Multiplier(completionElapsed, reason);
         int finalScore = ApplyMultiplier(normalizedScore, speedMultiplier);
         int finalMaximumScore = ApplyMultiplier(
             applicableMaximumScore,
@@ -187,18 +195,6 @@ public abstract class MiniGameRoundBase
         response.AddInt(session.RoundResult.MaximumScore);
         response.AddFloat(session.RoundResult.SpeedMultiplier);
         server.Send(response, session.ClientId);
-    }
-
-    private float GetSpeedMultiplier(float completedAtSeconds)
-    {
-        float bonusDuration = Math.Clamp(SpeedBonusDurationSeconds, 0f, DurationSeconds);
-        float remainingSeconds = Math.Max(0f, bonusDuration - completedAtSeconds);
-        if (bonusDuration <= 0f)
-            return 1f;
-
-        float bonusProgress = remainingSeconds / bonusDuration;
-        return 1f + ((MaximumEarlyFinishMultiplier - 1f) *
-            Math.Clamp(bonusProgress, 0f, 1f));
     }
 
     private static int ApplyMultiplier(int score, float multiplier)

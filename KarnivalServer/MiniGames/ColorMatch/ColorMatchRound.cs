@@ -52,7 +52,7 @@ public sealed class ColorMatchRound : MiniGameRoundBase
         byte submittedGreen = message.GetByte();
         byte submittedBlue = message.GetByte();
         float submittedAtSeconds = message.GetFloat();
-        float receivedAtSeconds = GetElapsedSeconds(DateTime.UtcNow);
+        float receivedAtSeconds = GetElapsedSeconds(NowUtc);
         if (!IsValidTimestamp(submittedAtSeconds, receivedAtSeconds))
             return;
 
@@ -81,7 +81,8 @@ public sealed class ColorMatchRound : MiniGameRoundBase
         Riptide.Server server)
     {
         foreach (PlayerSession session in sessions)
-            CompleteSubmission(session, 0, server);
+            CompleteSubmission(session, 0, server, completedAtSeconds: Timeline.EndsAt,
+                reason: Karnival.Rules.CompletionReason.Timeout);
     }
 
     public override string Describe()

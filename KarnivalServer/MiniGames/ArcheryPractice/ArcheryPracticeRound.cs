@@ -55,6 +55,8 @@ public sealed class ArcheryPracticeRound : MiniGameRoundBase
         this.settings = settings;
     }
 
+    protected override float SpeedBonusDurationSeconds => inputDurationSeconds;
+
     public override void RegisterPlayer(PlayerSession session, DateTime nowUtc)
     {
         if (playerStates.ContainsKey(session.ClientId))
@@ -84,7 +86,8 @@ public sealed class ArcheryPracticeRound : MiniGameRoundBase
                 elapsed >= inputDurationSeconds + InputGraceSeconds)
             {
                 state.ChargingShotId = null;
-                CompleteSubmission(session, 0, server);
+                CompleteSubmission(session, 0, server, completedAtSeconds: inputDurationSeconds,
+                    reason: Karnival.Rules.CompletionReason.Exhausted);
             }
         }
     }
@@ -96,7 +99,7 @@ public sealed class ArcheryPracticeRound : MiniGameRoundBase
     {
         ArcheryPracticeInputType inputType =
             (ArcheryPracticeInputType)message.GetByte();
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = NowUtc;
         RegisterPlayer(session, nowUtc);
         PlayerState state = playerStates[session.ClientId];
         float receivedAt = GetElapsedSeconds(nowUtc);
@@ -131,7 +134,8 @@ public sealed class ArcheryPracticeRound : MiniGameRoundBase
 
             ResolvePendingIfDue(session, state, DurationSeconds, server);
             if (!session.SubmittedThisRound)
-                CompleteSubmission(session, 0, server);
+                CompleteSubmission(session, 0, server, completedAtSeconds: inputDurationSeconds,
+                    reason: Karnival.Rules.CompletionReason.Exhausted);
         }
     }
 
@@ -256,11 +260,13 @@ public sealed class ArcheryPracticeRound : MiniGameRoundBase
         state.Pending = null;
         if (pending.Hit)
         {
-            CompleteSubmission(session, pending.Score, server);
+            CompleteSubmission(session, pending.Score, server,
+                completedAtSeconds: pending.ResolvesAtSeconds);
         }
         else if (elapsed >= inputDurationSeconds + InputGraceSeconds)
         {
-            CompleteSubmission(session, 0, server);
+            CompleteSubmission(session, 0, server, completedAtSeconds: inputDurationSeconds,
+                    reason: Karnival.Rules.CompletionReason.Exhausted);
         }
     }
 
